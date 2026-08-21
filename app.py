@@ -1,7 +1,7 @@
 """
 NSE Stock Screener — Interactive Analysis Engine
 ------------------------------------------------
-Includes TradingView Watchlist Exporter & Multi-Broker Auto-Parsing Portfolio Engine.
+Includes Multi-Broker Auto-Parser & API Data-Drop Protection for CANSLIM Scores.
 
 Run with: streamlit run app.py
 """
@@ -65,18 +65,9 @@ SECTOR_MAP = {
     "Unknown": "Unknown"
 }
 
-# Known broker symbol column headers (lowercased & stripped for matching)
 BROKER_SYMBOL_HEADERS = [
-    "instrument",        # Zerodha / General
-    "trading symbol",    # Upstox / Angel One
-    "tradingsymbol",     # Dhan / Upstox
-    "symbol",            # Standard / Groww / ICICI
-    "ticker",            # Standard
-    "company name",      # Groww / ICICI alternative
-    "stock name",        # General
-    "stock",             # General
-    "scrip name",        # ICICI Direct / Kotak
-    "display name"       # General
+    "instrument", "trading symbol", "tradingsymbol", "symbol", 
+    "ticker", "company name", "stock name", "stock", "scrip name", "display name"
 ]
 
 def abbreviate_sector(sector_raw: str) -> str:
@@ -103,7 +94,6 @@ def parse_broker_symbols(df: pd.DataFrame) -> list:
     
     for sym in raw_symbols:
         clean = sym.strip().upper()
-        # Strip common exchange prefixes/suffixes attached by brokers (e.g. NSE:TATAMOTORS, TATAMOTORS-EQ)
         clean = clean.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
         if clean and not clean.startswith("^"):
             formatted_symbols.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
@@ -124,8 +114,8 @@ def load_default_nifty500():
         pass
     return [
         "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-        "TRENT.NS", "HAL.NS", "TATAMOTORS.NS", "BAJFINANCE.NS", "LT.NS",
-        "SBIN.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS"
+        "AUBANK.NS", "TRENT.NS", "HAL.NS", "TATAMOTORS.NS", "BAJFINANCE.NS",
+        "LT.NS", "SBIN.NS", "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS"
     ]
 
 DEFAULT_UNIVERSE = load_default_nifty500()
@@ -221,7 +211,7 @@ def customize_rs_modal():
 
 
 # ----------------------------------------------------------------------------------
-# Fetching & Calculation Engines
+# Data Fetching & Robust Calculation Engines
 # ----------------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
@@ -246,7 +236,8 @@ def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_info(ticker: str) -> dict:
     default_info = {
-        "earningsGrowth": None, "revenueGrowth": None, "fiftyTwoWeekHigh": None,
+        "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
+        "revenueGrowth": None, "fiftyTwoWeekHigh": None,
         "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
         "sector": "Unknown",
     }
@@ -287,16 +278,44 @@ def is_rising(series: pd.Series, lookback: int = 2) -> bool:
 
 def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.DataFrame):
     raw_results = {}
+    valid_metrics = {}
+
+    # --- 1. EPS Growth ('C') with Multi-Key Fallback ---
     eps_growth = info.get("earningsGrowth")
+    if eps_growth is None:
+        eps_growth = info.get("earningsQuarterlyGrowth")
+
+    if eps_growth is not None and pd.notna(eps_growth):
+        raw_results["C"] = bool(eps_growth > 0.15)
+        valid_metrics["C"] = True
+    else:
+        raw_results["C"] = False
+        valid_metrics["C"] = False  # Mark as missing API field
+
+    # --- 2. Revenue Growth ('A') ---
     rev_growth = info.get("revenueGrowth")
+    if rev_growth is not None and pd.notna(rev_growth):
+        raw_results["A"] = bool(rev_growth > 0.10)
+        valid_metrics["A"] = True
+    else:
+        raw_results["A"] = False
+        valid_metrics["A"] = False  # Mark as missing API field
+
+    # --- 3. 52-Week High Proximity ('N') ---
     fifty2_high = info.get("fiftyTwoWeekHigh")
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-    inst_hold = info.get("heldPercentInstitutions")
 
-    raw_results["C"] = bool(eps_growth is not None and eps_growth > 0.15)
-    raw_results["A"] = bool(rev_growth is not None and rev_growth > 0.10)
-    raw_results["N"] = bool(fifty2_high and current_price and current_price >= 0.75 * fifty2_high)
-    
+    if not current_price and daily is not None and not daily.empty:
+        current_price = daily["Close"].iloc[-1]
+
+    if fifty2_high and current_price:
+        raw_results["N"] = bool(current_price >= 0.75 * fifty2_high)
+        valid_metrics["N"] = True
+    else:
+        raw_results["N"] = False
+        valid_metrics["N"] = True
+
+    # --- 4. Supply/Demand ('S') ---
     if daily is not None and len(daily) >= 50:
         close = daily["Close"]
         sma50 = close.rolling(50).mean().iloc[-1]
@@ -305,32 +324,47 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["S"] = bool(near_50 <= 5 and vol_std <= 6)
     else:
         raw_results["S"] = False
+    valid_metrics["S"] = True
 
+    # --- 5. Relative Strength Leader ('L') ---
     if daily is not None and len(daily) >= 14:
         rsi = ta.rsi(daily["Close"], length=14)
         raw_results["L"] = bool(rsi is not None and not rsi.empty and rsi.iloc[-1] > 55)
     else:
         raw_results["L"] = False
+    valid_metrics["L"] = True
 
-    raw_results["I"] = bool(inst_hold is not None and inst_hold > 0.30)
+    # --- 6. Institutional Holdings ('I') ---
+    inst_hold = info.get("heldPercentInstitutions")
+    if inst_hold is not None and pd.notna(inst_hold):
+        raw_results["I"] = bool(inst_hold > 0.30)
+        valid_metrics["I"] = True
+    else:
+        raw_results["I"] = False
+        valid_metrics["I"] = False  # Mark as missing API field
 
+    # --- 7. Market Direction ('M') ---
     if bench_daily is not None and len(bench_daily) >= 200:
         bench_close = bench_daily["Close"]
         bench_sma200 = bench_close.rolling(200).mean().iloc[-1]
         raw_results["M"] = bool(bench_close.iloc[-1] > bench_sma200)
     else:
         raw_results["M"] = False
+    valid_metrics["M"] = True
 
+    # --- Normalized Pro-Rata Scoring ---
     active_passed = 0
     active_total = 0
     passed_labels = []
 
     for k in DEFAULT_FUND_PARAMS:
         if st.session_state.get(f"fund_{k}", True):
-            active_total += 1
-            if raw_results.get(k, False):
-                active_passed += 1
-                passed_labels.append(k)
+            # Only include metric in denominator if API provided valid data
+            if valid_metrics.get(k, True):
+                active_total += 1
+                if raw_results.get(k, False):
+                    active_passed += 1
+                    passed_labels.append(k)
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
     status_str = ",".join(passed_labels) if passed_labels else "None"
@@ -597,7 +631,7 @@ with tab_screener:
                         st.markdown("##### **1. CANSLIM-7 Parameters**")
                         f_tbl = []
                         for k, label in DEFAULT_FUND_PARAMS.items():
-                            f_tbl.append({"Param": k, "Rule": label, "Status": "✅ PASS" if row['raw_fund'].get(k) else "❌ FAIL"})
+                            f_tbl.append({"Param": k, "Rule": label, "Status": "✅ PASS" if row['raw_fund'].get(k) else "❌ FAIL/NO DATA"})
                         st.dataframe(pd.DataFrame(f_tbl), hide_index=True, use_container_width=True)
 
                         st.markdown("##### **2. 10-Point Technical System**")
@@ -639,14 +673,13 @@ with tab_screener:
                 )
 
 # ==================================================================================
-# TAB 2: PORTFOLIO EVALUATOR (WITH MULTI-BROKER AUTO-PARSER)
+# TAB 2: PORTFOLIO EVALUATOR
 # ==================================================================================
 with tab_portfolio:
     st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
     st.caption("Supports raw holdings exports from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, and Kotak.")
     
     col_input1, col_input2 = st.columns([1, 1])
-    
     parsed_portfolio_tickers = []
     
     with col_input1:
@@ -670,7 +703,7 @@ with tab_portfolio:
 
     with col_input2:
         st.markdown("##### **Option B: Paste Stock Symbols Directly**")
-        raw_pasted = st.text_area("Paste symbols (separated by comma, space, or line breaks):", placeholder="TATAMOTORS, HDFCBANK, TRENT, HAL", height=100)
+        raw_pasted = st.text_area("Paste symbols (separated by comma, space, or line breaks):", placeholder="TATAMOTORS, HDFCBANK, TRENT, AUBANK", height=100)
         
         if raw_pasted.strip():
             delimiters = [",", "\n", " ", ";"]
