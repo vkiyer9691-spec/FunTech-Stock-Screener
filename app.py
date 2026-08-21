@@ -1,11 +1,7 @@
 """
 NSE Stock Screener — Interactive Analysis Engine
 ------------------------------------------------
-A Streamlit + yfinance based screener for NSE (.NS) stocks.
-Combines 3 customizable scoring pillars:
-1. Fundamental (CANSLIM-7)
-2. Technical (10-Point Technical System)
-3. Relative Strength (Broad Market + Sector Peer RS)
+Includes TradingView Watchlist Exporter & Multi-Broker Auto-Parsing Portfolio Engine.
 
 Run with: streamlit run app.py
 """
@@ -23,9 +19,9 @@ import yfinance as yf
 import pandas_ta as ta
 
 # ----------------------------------------------------------------------------------
-# Page config & Dynamic Theme Compatibility
+# Page Config & Styling
 # ----------------------------------------------------------------------------------
-st.set_page_config(page_title="NSE Stock Screener", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="NSE Stock Screener & Portfolio Evaluator", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown(
     """
@@ -46,8 +42,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("📊 NSE Stock Screener — Interactive Engine")
-st.caption("Customizable Fundamental (CANSLIM-7) + Technical (10-Point) + Relative Strength Scoring System.")
+st.title("📊 NSE Stock Screener & Portfolio Evaluator")
+st.caption("Customizable Fundamental (CANSLIM-7) + Technical (10-Point) + Relative Strength Engine.")
 
 # ----------------------------------------------------------------------------------
 # Constants & Helpers
@@ -69,10 +65,50 @@ SECTOR_MAP = {
     "Unknown": "Unknown"
 }
 
+# Known broker symbol column headers (lowercased & stripped for matching)
+BROKER_SYMBOL_HEADERS = [
+    "instrument",        # Zerodha / General
+    "trading symbol",    # Upstox / Angel One
+    "tradingsymbol",     # Dhan / Upstox
+    "symbol",            # Standard / Groww / ICICI
+    "ticker",            # Standard
+    "company name",      # Groww / ICICI alternative
+    "stock name",        # General
+    "stock",             # General
+    "scrip name",        # ICICI Direct / Kotak
+    "display name"       # General
+]
+
 def abbreviate_sector(sector_raw: str) -> str:
     if not sector_raw or sector_raw == "Unknown":
         return "Unknown"
     return SECTOR_MAP.get(sector_raw.strip(), sector_raw.strip())
+
+
+def parse_broker_symbols(df: pd.DataFrame) -> list:
+    """Auto-detects symbol/ticker column from popular Indian broker CSV/XLSX exports."""
+    matched_col = None
+    cleaned_cols = {str(c).strip().lower(): c for c in df.columns}
+    
+    for key in BROKER_SYMBOL_HEADERS:
+        if key in cleaned_cols:
+            matched_col = cleaned_cols[key]
+            break
+            
+    if not matched_col:
+        return []
+
+    raw_symbols = df[matched_col].dropna().astype(str).tolist()
+    formatted_symbols = []
+    
+    for sym in raw_symbols:
+        clean = sym.strip().upper()
+        # Strip common exchange prefixes/suffixes attached by brokers (e.g. NSE:TATAMOTORS, TATAMOTORS-EQ)
+        clean = clean.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
+        if clean and not clean.startswith("^"):
+            formatted_symbols.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+            
+    return list(dict.fromkeys(formatted_symbols))
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -122,7 +158,7 @@ DEFAULT_RS_PARAMS = {
     "RS2": "RS2: Sector Peer Relative Strength",
 }
 
-# Session State Initialization for Parameter Toggles
+# Session State Initialization
 for p_key in DEFAULT_FUND_PARAMS:
     if f"fund_{p_key}" not in st.session_state:
         st.session_state[f"fund_{p_key}"] = True
@@ -137,7 +173,7 @@ for p_key in DEFAULT_RS_PARAMS:
 
 
 # ----------------------------------------------------------------------------------
-# Customization Modals (Dialogs)
+# Dialog Modals
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
 def customize_fundamental_modal():
@@ -185,7 +221,7 @@ def customize_rs_modal():
 
 
 # ----------------------------------------------------------------------------------
-# Data Fetching & Resampling
+# Fetching & Calculation Engines
 # ----------------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
@@ -249,12 +285,8 @@ def is_rising(series: pd.Series, lookback: int = 2) -> bool:
     return len(s) >= lookback + 1 and bool(s.iloc[-1] > s.iloc[-(lookback + 1)])
 
 
-# ----------------------------------------------------------------------------------
-# Calculation Engines
-# ----------------------------------------------------------------------------------
 def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.DataFrame):
     raw_results = {}
-    
     eps_growth = info.get("earningsGrowth")
     rev_growth = info.get("revenueGrowth")
     fifty2_high = info.get("fiftyTwoWeekHigh")
@@ -264,6 +296,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
     raw_results["C"] = bool(eps_growth is not None and eps_growth > 0.15)
     raw_results["A"] = bool(rev_growth is not None and rev_growth > 0.10)
     raw_results["N"] = bool(fifty2_high and current_price and current_price >= 0.75 * fifty2_high)
+    
     if daily is not None and len(daily) >= 50:
         close = daily["Close"]
         sma50 = close.rolling(50).mean().iloc[-1]
@@ -301,7 +334,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
     status_str = ",".join(passed_labels) if passed_labels else "None"
-    
     return round(norm_score, 2), status_str, raw_results
 
 
@@ -364,7 +396,6 @@ def compute_technical_score(daily: pd.DataFrame):
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
     status_str = f"{active_passed}/{active_total}"
-
     return round(norm_score, 2), status_str, raw
 
 
@@ -402,48 +433,79 @@ def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFra
         "RS2_score": round(score_rs2, 2),
         "RS2_diff": round(outperform_sector, 2)
     }
-
     return round(norm_score, 2), status_str, raw_rs
 
 
+def execute_scan(ticker_list, w_fund, w_tech, w_rs):
+    bench_daily = fetch_daily(BENCHMARK)
+    stock_data = {}
+    sector_returns = {}
+    
+    progress = st.progress(0, text="Evaluating universe...")
+    for i, tkr in enumerate(ticker_list):
+        progress.progress((i + 1) / len(ticker_list), text=f"Processing {tkr}...")
+        daily = fetch_daily(tkr)
+        info = fetch_info(tkr)
+        if daily is not None:
+            stock_data[tkr] = {"daily": daily, "info": info}
+            if len(daily) >= 63:
+                ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-63] - 1) * 100
+                sec = info.get("sector", "Unknown")
+                sector_returns.setdefault(sec, []).append(ret)
+    progress.empty()
+
+    sector_avg = {sec: np.mean(rets) for sec, rets in sector_returns.items() if rets}
+
+    results = []
+    skipped = []
+
+    for tkr in ticker_list:
+        if tkr not in stock_data:
+            skipped.append(tkr)
+            continue
+        
+        daily = stock_data[tkr]["daily"]
+        info = stock_data[tkr]["info"]
+        raw_sec = info.get("sector", "Unknown")
+        sec_abbrev = abbreviate_sector(raw_sec)
+        sec_ret = sector_avg.get(raw_sec, np.nan)
+
+        fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily)
+        tech_score, tech_status, raw_tech = compute_technical_score(daily)
+        rs_score, rs_status, raw_rs = compute_relative_strength_score(daily, bench_daily, sec_ret)
+
+        total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
+
+        results.append({
+            "Ticker": tkr,
+            "Total Score": round(total_score, 2),
+            "Fundamental Score": fund_score,
+            "Technical Score": tech_score,
+            "Relative Strength Score": rs_score,
+            "Tech Passed": tech_status,
+            "CANSLIM Hits": fund_status,
+            "RS Details": rs_status,
+            "Sector": sec_abbrev,
+            "raw_fund": raw_fund,
+            "raw_tech": raw_tech,
+            "raw_rs": raw_rs,
+        })
+
+    return pd.DataFrame(results), skipped
+
+
 # ----------------------------------------------------------------------------------
-# Sidebar UI Controls
+# Sidebar Controls
 # ----------------------------------------------------------------------------------
-st.sidebar.header("⚙️ Screener Controls")
+st.sidebar.header("⚙️ Engine Controls")
 
-st.sidebar.subheader("1. Universe Selection")
-with st.sidebar.expander("📤 Upload CSV Universe (e.g. Custom List)", expanded=False):
-    uploaded_csv = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
-
-csv_tickers = []
-if uploaded_csv is not None:
-    try:
-        csv_df = pd.read_csv(uploaded_csv)
-        symbol_col = next((c for c in csv_df.columns if c.strip().lower() == "symbol"), None)
-        if symbol_col:
-            csv_tickers = [
-                f"{str(s).strip().upper()}.NS" if not str(s).strip().upper().endswith(".NS") else str(s).strip().upper()
-                for s in csv_df[symbol_col].dropna().tolist() if str(s).strip()
-            ]
-            st.sidebar.success(f"Loaded {len(csv_tickers)} tickers.")
-    except Exception as e:
-        st.sidebar.error(f"Error reading CSV: {e}")
-
-full_options = list(dict.fromkeys(DEFAULT_UNIVERSE + csv_tickers))
-selected_universe = st.sidebar.multiselect("Active Tickers", options=full_options, default=(csv_tickers if csv_tickers else DEFAULT_UNIVERSE))
-custom_raw = st.sidebar.text_input("Add Custom Tickers (comma-separated)", value="")
-custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
-universe = list(dict.fromkeys(selected_universe + custom_tickers))
-
-st.sidebar.divider()
-
-st.sidebar.subheader("2. Pillar Weights (Auto-Sum to 10)")
+st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
 w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, 4, key="w_fund")
 w_tech = st.sidebar.slider("Technical Weight", 0, 10, 4, key="w_tech")
 w_rs_calc = 10 - w_fund - w_tech
 
 if w_rs_calc < 0:
-    st.sidebar.error("Fundamental + Technical weight exceeds 10. Adjust sliders.")
+    st.sidebar.error("Weight total exceeds 10. Adjust sliders.")
     w_rs = 0
 else:
     w_rs = w_rs_calc
@@ -451,207 +513,237 @@ else:
 
 st.sidebar.divider()
 
-st.sidebar.subheader("3. Pillar Customization Modals")
-if st.sidebar.button("⚙️ Customize Fundamental (CANSLIM)", use_container_width=True):
+st.sidebar.subheader("2. Pillar Customization")
+if st.sidebar.button("⚙️ Fundamental Rules", use_container_width=True):
     customize_fundamental_modal()
 
-if st.sidebar.button("⚙️ Customize Technical (10-Point)", use_container_width=True):
+if st.sidebar.button("⚙️ Technical Rules", use_container_width=True):
     customize_technical_modal()
 
-if st.sidebar.button("⚙️ Customize Relative Strength", use_container_width=True):
+if st.sidebar.button("⚙️ Relative Strength Rules", use_container_width=True):
     customize_rs_modal()
 
-st.sidebar.divider()
-run_scan = st.sidebar.button("🔍 Run / Refresh Screening Scan", use_container_width=True)
-
-
 # ----------------------------------------------------------------------------------
-# Main Screening Execution & Rendering
+# Navigation Tabs
 # ----------------------------------------------------------------------------------
-if run_scan:
-    if not universe:
-        st.warning("Please select at least one ticker in the sidebar.")
-    else:
-        st.cache_data.clear()
-        with st.spinner("Fetching benchmark and stock data..."):
-            bench_daily = fetch_daily(BENCHMARK)
+tab_screener, tab_portfolio = st.tabs(["🔍 Stock Screener", "💼 Portfolio Evaluator"])
+
+# ==================================================================================
+# TAB 1: STOCK SCREENER
+# ==================================================================================
+with tab_screener:
+    st.sidebar.divider()
+    st.sidebar.subheader("3. Screener Universe")
+    
+    with st.sidebar.expander("📤 Upload Custom CSV List", expanded=False):
+        uploaded_csv = st.file_uploader("Upload Universe CSV", type=["csv"], key="scr_csv", label_visibility="collapsed")
+
+    csv_tickers = []
+    if uploaded_csv is not None:
+        try:
+            csv_df = pd.read_csv(uploaded_csv)
+            csv_tickers = parse_broker_symbols(csv_df)
+            if csv_tickers:
+                st.sidebar.success(f"Loaded {len(csv_tickers)} tickers.")
+        except Exception as e:
+            st.sidebar.error(f"Error parsing universe file: {e}")
+
+    full_options = list(dict.fromkeys(DEFAULT_UNIVERSE + csv_tickers))
+    selected_universe = st.sidebar.multiselect("Active Tickers", options=full_options, default=(csv_tickers if csv_tickers else DEFAULT_UNIVERSE))
+    custom_raw = st.sidebar.text_input("Add Custom Tickers", value="")
+    custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
+    universe = list(dict.fromkeys(selected_universe + custom_tickers))
+
+    run_scan = st.sidebar.button("🔍 Run Screener Scan", use_container_width=True)
+
+    if run_scan:
+        if not universe:
+            st.warning("Select at least one ticker.")
+        else:
+            st.cache_data.clear()
+            with st.spinner("Running quantitative scan..."):
+                results_df, skipped = execute_scan(universe, w_fund, w_tech, w_rs)
+                st.session_state["results_df"] = results_df
+                st.session_state["skipped_tickers"] = skipped
+
+    if "results_df" in st.session_state:
+        df = st.session_state["results_df"]
+        skipped = st.session_state.get("skipped_tickers", [])
+
+        if not df.empty:
+            df = df.sort_values("Total Score", ascending=False).reset_index(drop=True)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Screened Tickers", len(df))
+            c2.metric("Highest Total Score", f"{df['Total Score'].max():.2f}")
+            c3.metric("Average Score", f"{df['Total Score'].mean():.2f}")
+
+            st.subheader("📋 Screening Results")
+            st.info("💡 **Click symbol name** to view its score breakdown modal.")
+
+            col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
+            cols = st.columns(col_ratios)
+            headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
+            for c, h in zip(cols, headers):
+                c.markdown(f"**{h}**")
+            st.divider()
+
+            for idx, row in df.iterrows():
+                r_cols = st.columns(col_ratios)
+                with r_cols[0]:
+                    with st.popover(row['Ticker'], use_container_width=True):
+                        st.subheader(f"Breakdown: {row['Ticker']}")
+                        
+                        st.markdown("##### **1. CANSLIM-7 Parameters**")
+                        f_tbl = []
+                        for k, label in DEFAULT_FUND_PARAMS.items():
+                            f_tbl.append({"Param": k, "Rule": label, "Status": "✅ PASS" if row['raw_fund'].get(k) else "❌ FAIL"})
+                        st.dataframe(pd.DataFrame(f_tbl), hide_index=True, use_container_width=True)
+
+                        st.markdown("##### **2. 10-Point Technical System**")
+                        t_tbl = []
+                        for k, label in DEFAULT_TECH_PARAMS.items():
+                            t_tbl.append({"Param": k, "Rule": label, "Status": "✅ PASS" if row['raw_tech'].get(k) else "❌ FAIL"})
+                        st.dataframe(pd.DataFrame(t_tbl), hide_index=True, use_container_width=True)
+
+                r_cols[1].write(f"**{row['Total Score']:.2f}**")
+                r_cols[2].write(f"{row['Fundamental Score']:.2f}")
+                r_cols[3].write(f"{row['Technical Score']:.2f}")
+                r_cols[4].write(f"{row['Relative Strength Score']:.2f}")
+                r_cols[5].write(row['Tech Passed'])
+                r_cols[6].write(row['CANSLIM Hits'])
+                r_cols[7].write(row['RS Details'])
+                r_cols[8].write(row['Sector'])
+
+            st.divider()
+
+            # --- TRADINGVIEW EXPORT SECTION ---
+            st.subheader("📈 TradingView Watchlist Exporter")
+            col_exp1, col_exp2 = st.columns([2, 1])
+            with col_exp1:
+                threshold = st.slider("Minimum Total Score Threshold for Export", 0.0, 10.0, 6.0, 0.5)
             
-            stock_data = {}
-            sector_returns = {}
-            
-            progress = st.progress(0, text="Fetching price histories...")
-            for i, tkr in enumerate(universe):
-                progress.progress((i + 1) / len(universe), text=f"Fetching {tkr}...")
-                daily = fetch_daily(tkr)
-                info = fetch_info(tkr)
-                if daily is not None:
-                    stock_data[tkr] = {"daily": daily, "info": info}
-                    if len(daily) >= 63:
-                        ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-63] - 1) * 100
-                        sec = info.get("sector", "Unknown")
-                        sector_returns.setdefault(sec, []).append(ret)
-            progress.empty()
+            filtered_df = df[df["Total Score"] >= threshold]
+            tv_symbols = [f"NSE:{s.replace('.NS', '')}" for s in filtered_df["Ticker"].tolist()]
+            tv_content = ",".join(tv_symbols)
 
-            sector_avg = {sec: np.mean(rets) for sec, rets in sector_returns.items() if rets}
+            with col_exp2:
+                st.write(f"**{len(tv_symbols)} tickers** match score $\ge {threshold:.1f}$")
+                st.download_button(
+                    label="⬇️ Download TradingView Watchlist (.txt)",
+                    data=tv_content,
+                    file_name=f"TradingView_Watchlist_Score_{threshold}.txt",
+                    mime="text/plain",
+                    disabled=len(tv_symbols) == 0,
+                    use_container_width=True
+                )
 
-            results = []
-            skipped = []
-
-            for tkr in universe:
-                if tkr not in stock_data:
-                    skipped.append(tkr)
-                    continue
-                
-                daily = stock_data[tkr]["daily"]
-                info = stock_data[tkr]["info"]
-                raw_sec = info.get("sector", "Unknown")
-                sec_abbrev = abbreviate_sector(raw_sec)
-                sec_ret = sector_avg.get(raw_sec, np.nan)
-
-                fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily)
-                tech_score, tech_status, raw_tech = compute_technical_score(daily)
-                rs_score, rs_status, raw_rs = compute_relative_strength_score(daily, bench_daily, sec_ret)
-
-                total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
-
-                results.append({
-                    "Ticker": tkr,
-                    "Total Score": round(total_score, 2),
-                    "Fundamental Score": fund_score,
-                    "Technical Score": tech_score,
-                    "Relative Strength Score": rs_score,
-                    "Tech Passed": tech_status,
-                    "CANSLIM Hits": fund_status,
-                    "RS Details": rs_status,
-                    "Sector": sec_abbrev,
-                    "raw_fund": raw_fund,
-                    "raw_tech": raw_tech,
-                    "raw_rs": raw_rs,
-                })
-
-            st.session_state["results_df"] = pd.DataFrame(results)
-            st.session_state["skipped_tickers"] = skipped
-
-if "results_df" in st.session_state:
-    df = st.session_state["results_df"]
-    skipped = st.session_state.get("skipped_tickers", [])
-
-    if not df.empty:
-        df = df.sort_values("Total Score", ascending=False).reset_index(drop=True)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Tickers Screened", len(df))
-        col2.metric("Top Score", f"{df['Total Score'].max():.2f}")
-        col3.metric("Avg Total Score", f"{df['Total Score'].mean():.2f}")
-
-        st.subheader("📋 Screening Results")
-        st.info("💡 **Click on symbol name** to view its parameter breakdown modal.")
+# ==================================================================================
+# TAB 2: PORTFOLIO EVALUATOR (WITH MULTI-BROKER AUTO-PARSER)
+# ==================================================================================
+with tab_portfolio:
+    st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
+    st.caption("Supports raw holdings exports from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, and Kotak.")
+    
+    col_input1, col_input2 = st.columns([1, 1])
+    
+    parsed_portfolio_tickers = []
+    
+    with col_input1:
+        st.markdown("##### **Option A: Upload Broker Holdings Export File**")
+        port_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx", "xls"], key="port_upload")
         
-        display_cols = [
-            "Ticker", "Total Score", "Fundamental Score", "Technical Score", "Relative Strength Score",
-            "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
-        ]
-
-        # Squeezed column ratios: minimal space for numeric scores, maximum for text
-        col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
-        
-        cols = st.columns(col_ratios)
-        headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
-        for c, h in zip(cols, headers):
-            c.markdown(f"**{h}**")
-        st.divider()
-
-        for idx, row in df.iterrows():
-            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(col_ratios)
-            
-            with c1:
-                with st.popover(row['Ticker'], use_container_width=True):
-                    st.subheader(f"Parameter Scoring Breakdown: {row['Ticker']}")
+        if port_file is not None:
+            try:
+                if port_file.name.endswith(".csv"):
+                    p_df = pd.read_csv(port_file)
+                else:
+                    p_df = pd.read_excel(port_file)
                     
-                    # 1. CANSLIM-7 Breakdown
-                    st.markdown("##### **1. CANSLIM-7 Fundamental Parameters**")
-                    fund_table = []
-                    raw_fund = row['raw_fund']
-                    for k, label in DEFAULT_FUND_PARAMS.items():
-                        is_active = st.session_state.get(f"fund_{k}", True)
-                        passed = raw_fund.get(k, False)
-                        status = "✅ PASS" if passed else "❌ FAIL"
-                        if not is_active:
-                            status = "⚪ INACTIVE"
-                        fund_table.append({"Param": k, "Description": label, "Status": status})
-                    st.dataframe(pd.DataFrame(fund_table), hide_index=True, use_container_width=True)
+                parsed_portfolio_tickers = parse_broker_symbols(p_df)
+                if parsed_portfolio_tickers:
+                    st.success(f"✅ Auto-parsed **{len(parsed_portfolio_tickers)} symbols** from broker file.")
+                else:
+                    st.error("⚠️ Could not auto-detect symbol column. Use Option B to paste symbols.")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
 
-                    # 2. 10-Point Technical System
-                    st.markdown("##### **2. 10-Point Technical System**")
-                    tech_table = []
-                    raw_tech = row['raw_tech']
-                    for k, label in DEFAULT_TECH_PARAMS.items():
-                        is_active = st.session_state.get(f"tech_{k}", True)
-                        passed = raw_tech.get(k, False)
-                        status = "✅ PASS" if passed else "❌ FAIL"
-                        if not is_active:
-                            status = "⚪ INACTIVE"
-                        tech_table.append({"Param": k, "Rule": label, "Status": status})
-                    st.dataframe(pd.DataFrame(tech_table), hide_index=True, use_container_width=True)
+    with col_input2:
+        st.markdown("##### **Option B: Paste Stock Symbols Directly**")
+        raw_pasted = st.text_area("Paste symbols (separated by comma, space, or line breaks):", placeholder="TATAMOTORS, HDFCBANK, TRENT, HAL", height=100)
+        
+        if raw_pasted.strip():
+            delimiters = [",", "\n", " ", ";"]
+            temp_str = raw_pasted
+            for d in delimiters:
+                temp_str = temp_str.replace(d, "|")
+            pasted_symbols = [s.strip().upper() for s in temp_str.split("|") if s.strip()]
+            
+            pasted_formatted = [
+                f"{s.replace('NSE:', '').replace('-EQ', '')}.NS" if not s.endswith(".NS") else s
+                for s in pasted_symbols
+            ]
+            
+            if not parsed_portfolio_tickers:
+                parsed_portfolio_tickers = list(dict.fromkeys(pasted_formatted))
+                st.info(f"Loaded **{len(parsed_portfolio_tickers)} symbols** from pasted text.")
 
-                    # 3. Relative Strength Parameters
-                    st.markdown("##### **3. Relative Strength Parameters**")
-                    raw_rs = row['raw_rs']
-                    rs_table = [
-                        {
-                            "Parameter": "RS1: Broad Market (^NSEI)",
-                            "Active": st.session_state.get("rs_RS1", True),
-                            "Outperformance": f"{raw_rs.get('RS1_diff', 0):+.2f}%",
-                            "Points Earned": f"{raw_rs.get('RS1_score', 0):.2f} / 5.0"
-                        },
-                        {
-                            "Parameter": "RS2: Sector Peer Average",
-                            "Active": st.session_state.get("rs_RS2", True),
-                            "Outperformance": f"{raw_rs.get('RS2_diff', 0):+.2f}%",
-                            "Points Earned": f"{raw_rs.get('RS2_score', 0):.2f} / 5.0"
-                        }
-                    ]
-                    st.dataframe(pd.DataFrame(rs_table), hide_index=True, use_container_width=True)
+    st.divider()
 
-            c2.write(f"**{row['Total Score']:.2f}**")
-            c3.write(f"{row['Fundamental Score']:.2f}")
-            c4.write(f"{row['Technical Score']:.2f}")
-            c5.write(f"{row['Relative Strength Score']:.2f}")
-            c6.write(row['Tech Passed'])
-            c7.write(row['CANSLIM Hits'])
-            c8.write(row['RS Details'])
-            c9.write(row['Sector'])
+    if parsed_portfolio_tickers:
+        st.write(f"**Loaded Holdings ({len(parsed_portfolio_tickers)}):** `" + ", ".join([s.replace(".NS", "") for s in parsed_portfolio_tickers]) + "`")
+        
+        if st.button("🚀 Evaluate Portfolio Health", use_container_width=True):
+            with st.spinner("Evaluating portfolio holdings against 3-Pillar engine..."):
+                p_results, p_skipped = execute_scan(parsed_portfolio_tickers, w_fund, w_tech, w_rs)
+                
+                if not p_results.empty:
+                    p_results = p_results.sort_values("Total Score", ascending=False).reset_index(drop=True)
+                    
+                    p_avg_score = p_results["Total Score"].mean()
+                    p_weak = p_results[p_results["Total Score"] < 5.0]
+                    p_strong = p_results[p_results["Total Score"] >= 7.0]
 
-        st.divider()
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    col_p1.metric("Portfolio Health Score", f"{p_avg_score:.2f} / 10")
+                    col_p2.metric("Strong Holdings (Score ≥ 7.0)", len(p_strong))
+                    col_p3.metric("Weak Holdings (Score < 5.0)", len(p_weak))
 
-        st.download_button(
-            "⬇️ Download Results CSV",
-            data=df[display_cols].to_csv(index=False).encode("utf-8"),
-            file_name="nse_screener_results.csv",
-            mime="text/csv",
-        )
+                    st.divider()
+                    st.subheader("📊 Portfolio Scoring Matrix")
 
-    if skipped:
-        st.warning(f"⚠️ {len(skipped)} ticker(s) skipped due to missing feed/insufficient data: {', '.join(skipped)}")
-else:
-    st.info("Configure universe and weights in the sidebar, then click **Run / Refresh Screening Scan**.")
+                    col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
+                    cols = st.columns(col_ratios)
+                    headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
+                    for c, h in zip(cols, headers):
+                        c.markdown(f"**{h}**")
+                    st.divider()
+
+                    for idx, row in p_results.iterrows():
+                        r_cols = st.columns(col_ratios)
+                        r_cols[0].write(f"**{row['Ticker']}**")
+                        r_cols[1].write(f"**{row['Total Score']:.2f}**")
+                        r_cols[2].write(f"{row['Fundamental Score']:.2f}")
+                        r_cols[3].write(f"{row['Technical Score']:.2f}")
+                        r_cols[4].write(f"{row['Relative Strength Score']:.2f}")
+                        r_cols[5].write(row['Tech Passed'])
+                        r_cols[6].write(row['CANSLIM Hits'])
+                        r_cols[7].write(row['RS Details'])
+                        r_cols[8].write(row['Sector'])
+
+                    st.divider()
+                    st.download_button(
+                        label="⬇️ Export Portfolio Evaluation CSV",
+                        data=p_results.to_csv(index=False).encode("utf-8"),
+                        file_name="portfolio_evaluation_results.csv",
+                        mime="text/csv"
+                    )
 
 # ----------------------------------------------------------------------------------
-# Footer & Disclaimer
+# Footer
 # ----------------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Disclaimer:** This application is strictly for educational and informational purposes "
-    "and does not constitute investment or financial advice. Quantitative models, technical indicators, "
-    "and CANSLIM scoring filters are algorithmic abstractions based on historical data and do not guarantee "
-    "future returns or market success. Market parameters, pricing feeds, and fundamentals provided via third-party APIs "
-    "(such as Yahoo Finance) may contain delays, inaccuracies, or incomplete historical data. Always perform "
-    "independent, rigorous research and consult a SEBI-registered financial advisor before making any trading "
-    "or investment decisions."
-)
-st.markdown(
-    "<div style='text-align: center; color: #9aa0a6; padding-top: 10px; font-size: 0.85rem;'>"
-    "💬 For any feedback or queries, contact the creator at <b>vkiyer@hotmail.com</b>"
-    "</div>",
-    unsafe_allow_html=True,
+    "**Disclaimer:** For educational and research purposes only. "
+    "Not SEBI-registered financial advice."
 )
