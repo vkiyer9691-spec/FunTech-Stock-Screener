@@ -29,6 +29,11 @@ st.set_page_config(page_title="NSE Stock Screener", layout="wide", initial_sideb
 
 st.markdown(
     """
+    <head>
+        <title>NSE Screener</title>
+        <meta name="application-name" content="NSE Screener">
+        <meta name="apple-mobile-web-app-title" content="NSE Screener">
+    </head>
     <style>
     .stApp { background-color: #0e1117; }
     section[data-testid="stSidebar"] { background-color: #131722; }
