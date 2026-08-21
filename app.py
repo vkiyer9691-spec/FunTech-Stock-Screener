@@ -27,15 +27,17 @@ import pandas_ta as ta
 # ----------------------------------------------------------------------------------
 st.set_page_config(page_title="NSE Stock Screener", layout="wide", initial_sidebar_state="expanded")
 
-# Minimal custom CSS that supports both Light and Dark Streamlit themes
 st.markdown(
     """
     <style>
     div[data-testid="stMetricValue"] { font-weight: 600; }
     button[data-testid="stBaseButton-popover"] {
-        padding-top: 0.25rem;
-        padding-bottom: 0.25rem;
+        padding-top: 0.2rem;
+        padding-bottom: 0.2rem;
         font-weight: 600;
+    }
+    div[data-testid="column"] {
+        white-space: nowrap;
     }
     </style>
     """,
@@ -61,7 +63,6 @@ def load_default_nifty500():
             return [f"{str(s).strip().upper()}.NS" for s in df[symbol_col].dropna().tolist() if str(s).strip()]
     except Exception:
         pass
-    # Fallback subset if network blocks direct CSV archive fetch
     return [
         "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
         "TRENT.NS", "HAL.NS", "TATAMOTORS.NS", "BAJFINANCE.NS", "LT.NS",
@@ -276,14 +277,14 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
                 passed_labels.append(k)
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
-    status_str = f"{active_passed}/{active_total} active ({', '.join(passed_labels) if passed_labels else 'None'})"
+    status_str = ", ".join(passed_labels) if passed_labels else "None"
     
     return round(norm_score, 2), status_str, raw_results
 
 
 def compute_technical_score(daily: pd.DataFrame):
     if daily is None or len(daily) < 30:
-        return 0.0, "0/0 active", {}
+        return 0.0, "0/0", {}
 
     close = daily["Close"]
     d = daily.copy()
@@ -339,14 +340,14 @@ def compute_technical_score(daily: pd.DataFrame):
                 active_passed += 1
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
-    status_str = f"{active_passed}/{active_total} active"
+    status_str = f"{active_passed}/{active_total}"
 
     return round(norm_score, 2), status_str, raw
 
 
 def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFrame, sector_avg_ret: float, lookback: int = 63):
     if daily is None or bench_daily is None or len(daily) < 10 or len(bench_daily) < 10:
-        return 0.0, "0/0 active", {}
+        return 0.0, "Broad: N/A | Sector: N/A", {}
 
     n = min(lookback, len(daily) - 1, len(bench_daily) - 1)
     stock_ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-n] - 1) * 100
@@ -370,7 +371,7 @@ def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFra
         pts_max += 5.0
 
     norm_score = (pts_earned / pts_max * 10) if pts_max > 0 else 0.0
-    status_str = f"Broad RS: {outperform_bench:+.1f}% | Sector RS: {outperform_sector:+.1f}%"
+    status_str = f"Broad: {outperform_bench:+.1f}% | Sector: {outperform_sector:+.1f}%"
 
     raw_rs = {
         "RS1_score": round(score_rs1, 2),
@@ -527,16 +528,17 @@ if "results_df" in st.session_state:
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]
 
-        # Table Header Layout
-        cols = st.columns([1.8, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+        # Optimized column ratio to enforce single-line rendering
+        col_ratios = [1.6, 0.8, 0.8, 0.8, 0.8, 1.0, 1.5, 2.5, 1.2]
+        
+        cols = st.columns(col_ratios)
         headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
         for c, h in zip(cols, headers):
             c.markdown(f"**{h}**")
         st.divider()
 
-        # Clean symbol popover without emoji icon
         for idx, row in df.iterrows():
-            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([1.8, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(col_ratios)
             
             with c1:
                 with st.popover(row['Ticker'], use_container_width=True):
