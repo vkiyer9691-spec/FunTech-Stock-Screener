@@ -869,7 +869,8 @@ with tab_guide:
 # ----------------------------------------------------------------------------------
 st.divider()
 st.caption(
-    "**Disclaimer:** For educational and research purposes only. "
-    "Not SEBI-registered financial advice. "
-    "For any feedback or queries, please contact the creator at vkiyer@hotmail.com."
+    "**Disclaimer:** The information provided relies on public or third-party data feeds that may be delayed, "
+    "incomplete, or unsynchronized with live market conditions. This content is strictly educational and not financial advice. "
+    "Users must independently verify all data, prices, and setups using real-time feeds before making any trading decisions. "
+    "For queries and feedback, contact the creator at vkiyer@hotmail.com."
 )
