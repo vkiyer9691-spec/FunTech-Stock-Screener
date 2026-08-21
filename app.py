@@ -1,7 +1,7 @@
 """
 NSE Stock Screener — Interactive Analysis Engine
 ------------------------------------------------
-Includes Multi-Broker Auto-Parser & API Data-Drop Protection for CANSLIM Scores.
+Includes Multi-Broker Auto-Parser, API Data-Drop Protection, and Top-Positioned 1-Click TradingView Exporter.
 
 Run with: streamlit run app.py
 """
@@ -290,7 +290,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         valid_metrics["C"] = True
     else:
         raw_results["C"] = False
-        valid_metrics["C"] = False  # Mark as missing API field
+        valid_metrics["C"] = False
 
     # --- 2. Revenue Growth ('A') ---
     rev_growth = info.get("revenueGrowth")
@@ -299,7 +299,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         valid_metrics["A"] = True
     else:
         raw_results["A"] = False
-        valid_metrics["A"] = False  # Mark as missing API field
+        valid_metrics["A"] = False
 
     # --- 3. 52-Week High Proximity ('N') ---
     fifty2_high = info.get("fiftyTwoWeekHigh")
@@ -341,7 +341,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         valid_metrics["I"] = True
     else:
         raw_results["I"] = False
-        valid_metrics["I"] = False  # Mark as missing API field
+        valid_metrics["I"] = False
 
     # --- 7. Market Direction ('M') ---
     if bench_daily is not None and len(bench_daily) >= 200:
@@ -359,7 +359,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
 
     for k in DEFAULT_FUND_PARAMS:
         if st.session_state.get(f"fund_{k}", True):
-            # Only include metric in denominator if API provided valid data
             if valid_metrics.get(k, True):
                 active_total += 1
                 if raw_results.get(k, False):
@@ -612,7 +611,31 @@ with tab_screener:
             c2.metric("Highest Total Score", f"{df['Total Score'].max():.2f}")
             c3.metric("Average Score", f"{df['Total Score'].mean():.2f}")
 
-            st.subheader("📋 Screening Results")
+            st.divider()
+
+            # --- TRADINGVIEW 1-CLICK CLIPBOARD EXPORT (TOP POSITION) ---
+            st.subheader("📈 TradingView 1-Click Clipboard Exporter")
+            col_tv1, col_tv2 = st.columns([1, 2])
+            
+            with col_tv1:
+                threshold = st.slider("Min Score Filter", 0.0, 10.0, 6.0, 0.5)
+            
+            filtered_df = df[df["Total Score"] >= threshold]
+            tv_symbols = [f"NSE:{s.replace('.NS', '')}" for s in filtered_df["Ticker"].tolist()]
+            tv_content = ",".join(tv_symbols)
+
+            with col_tv2:
+                st.write(f"**{len(tv_symbols)} matching tickers** ($\ge {threshold:.1f}$). Click copy button on right ➡️")
+                if tv_symbols:
+                    # Renders code box with Streamlit's built-in top-right copy button
+                    st.code(tv_content, language="text")
+                else:
+                    st.info("No tickers match this score threshold.")
+
+            st.divider()
+
+            # --- SCREENER RESULTS TABLE ---
+            st.subheader("📋 Screening Results Table")
             st.info("💡 **Click symbol name** to view its score breakdown modal.")
 
             col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
@@ -648,29 +671,6 @@ with tab_screener:
                 r_cols[6].write(row['CANSLIM Hits'])
                 r_cols[7].write(row['RS Details'])
                 r_cols[8].write(row['Sector'])
-
-            st.divider()
-
-            # --- TRADINGVIEW EXPORT SECTION ---
-            st.subheader("📈 TradingView Watchlist Exporter")
-            col_exp1, col_exp2 = st.columns([2, 1])
-            with col_exp1:
-                threshold = st.slider("Minimum Total Score Threshold for Export", 0.0, 10.0, 6.0, 0.5)
-            
-            filtered_df = df[df["Total Score"] >= threshold]
-            tv_symbols = [f"NSE:{s.replace('.NS', '')}" for s in filtered_df["Ticker"].tolist()]
-            tv_content = ",".join(tv_symbols)
-
-            with col_exp2:
-                st.write(f"**{len(tv_symbols)} tickers** match score $\ge {threshold:.1f}$")
-                st.download_button(
-                    label="⬇️ Download TradingView Watchlist (.txt)",
-                    data=tv_content,
-                    file_name=f"TradingView_Watchlist_Score_{threshold}.txt",
-                    mime="text/plain",
-                    disabled=len(tv_symbols) == 0,
-                    use_container_width=True
-                )
 
 # ==================================================================================
 # TAB 2: PORTFOLIO EVALUATOR
