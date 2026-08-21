@@ -870,5 +870,6 @@ with tab_guide:
 st.divider()
 st.caption(
     "**Disclaimer:** For educational and research purposes only. "
-    "Not SEBI-registered financial advice."
+    "Not SEBI-registered financial advice. "
+    "For any feedback or queries, please contact the creator at vkiyer@hotmail.com."
 )
