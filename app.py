@@ -23,23 +23,20 @@ import yfinance as yf
 import pandas_ta as ta
 
 # ----------------------------------------------------------------------------------
-# Page config & dark theme styling
+# Page config & Dynamic Theme Compatibility
 # ----------------------------------------------------------------------------------
 st.set_page_config(page_title="NSE Stock Screener", layout="wide", initial_sidebar_state="expanded")
 
+# Minimal custom CSS that supports both Light and Dark Streamlit themes
 st.markdown(
     """
-    <head>
-        <title>NSE Screener</title>
-        <meta name="application-name" content="NSE Screener">
-        <meta name="apple-mobile-web-app-title" content="NSE Screener">
-    </head>
     <style>
-    .stApp { background-color: #0e1117; }
-    section[data-testid="stSidebar"] { background-color: #131722; }
-    h1, h2, h3 { color: #e8eaed; }
-    .metric-label { color: #9aa0a6; }
-    div[data-testid="stMetricValue"] { color: #22c55e; }
+    div[data-testid="stMetricValue"] { font-weight: 600; }
+    button[data-testid="stBaseButton-popover"] {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+        font-weight: 600;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -523,26 +520,26 @@ if "results_df" in st.session_state:
         col3.metric("Avg Total Score", f"{df['Total Score'].mean():.2f}")
 
         st.subheader("📋 Screening Results")
-        st.info("💡 **Click on symbol to know more** — Tap any stock ticker symbol directly to launch its detailed parameter evaluation modal.")
+        st.info("💡 **Click on symbol name** to view its parameter breakdown modal.")
         
         display_cols = [
             "Ticker", "Total Score", "Fundamental Score", "Technical Score", "Relative Strength Score",
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]
 
-        # Table Header Layout without extra "Details" column
-        cols = st.columns([2.0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+        # Table Header Layout
+        cols = st.columns([1.8, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
         headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
         for c, h in zip(cols, headers):
             c.markdown(f"**{h}**")
         st.divider()
 
-        # Render rows: Column 1 becomes the direct click trigger popover button
+        # Clean symbol popover without emoji icon
         for idx, row in df.iterrows():
-            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([2.0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([1.8, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
             
             with c1:
-                with st.popover(f"🔍 {row['Ticker']}", use_container_width=True):
+                with st.popover(row['Ticker'], use_container_width=True):
                     st.subheader(f"Parameter Scoring Breakdown: {row['Ticker']}")
                     
                     # 1. CANSLIM-7 Breakdown
