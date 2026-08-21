@@ -1,7 +1,8 @@
 """
 NSE Stock Screener — Interactive Analysis Engine
 ------------------------------------------------
-Includes Multi-Broker Auto-Parser, API Data-Drop Protection, and Top-Positioned 1-Click TradingView Exporter.
+Includes Multi-Broker Auto-Parser, API Data-Drop Protection,
+Top-Positioned 1-Click TradingView Exporter, and Complete User Guide.
 
 Run with: streamlit run app.py
 """
@@ -43,7 +44,7 @@ st.markdown(
 )
 
 st.title("📊 NSE Stock Screener & Portfolio Evaluator")
-st.caption("Customizable Fundamental (CANSLIM-7) + Technical (10-Point) + Relative Strength Engine.")
+st.caption("Quantitative Multi-Pillar Engine for Swing Traders & Growth Investors.")
 
 # ----------------------------------------------------------------------------------
 # Constants & Helpers
@@ -280,7 +281,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
     raw_results = {}
     valid_metrics = {}
 
-    # --- 1. EPS Growth ('C') with Multi-Key Fallback ---
+    # --- 1. EPS Growth ('C') ---
     eps_growth = info.get("earningsGrowth")
     if eps_growth is None:
         eps_growth = info.get("earningsQuarterlyGrowth")
@@ -559,7 +560,7 @@ if st.sidebar.button("⚙️ Relative Strength Rules", use_container_width=True)
 # ----------------------------------------------------------------------------------
 # Navigation Tabs
 # ----------------------------------------------------------------------------------
-tab_screener, tab_portfolio = st.tabs(["🔍 Stock Screener", "💼 Portfolio Evaluator"])
+tab_screener, tab_portfolio, tab_guide = st.tabs(["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ How It Works & Guide"])
 
 # ==================================================================================
 # TAB 1: STOCK SCREENER
@@ -627,7 +628,6 @@ with tab_screener:
             with col_tv2:
                 st.write(f"**{len(tv_symbols)} matching tickers** ($\ge {threshold:.1f}$). Click copy button on right ➡️")
                 if tv_symbols:
-                    # Renders code box with Streamlit's built-in top-right copy button
                     st.code(tv_content, language="text")
                 else:
                     st.info("No tickers match this score threshold.")
@@ -771,6 +771,98 @@ with tab_portfolio:
                         file_name="portfolio_evaluation_results.csv",
                         mime="text/csv"
                     )
+
+# ==================================================================================
+# TAB 3: HOW IT WORKS & USER GUIDE
+# ==================================================================================
+with tab_guide:
+    st.subheader("ℹ️ Application Overview & User Guide")
+    st.markdown(
+        """
+        This application is an **automated quantitative scoring engine** designed for Indian equities (NSE). 
+        It evaluates stocks using a balanced 3-pillar framework combining **CANSLIM fundamental growth**, 
+        **10-point multi-timeframe technical momentum**, and **broad market/sector relative strength**.
+        """
+    )
+
+    st.divider()
+
+    st.markdown("### 🏛️ The 3 Scoring Pillars Explained")
+
+    col_g1, col_g2, col_g3 = st.columns(3)
+
+    with col_g1:
+        st.markdown("#### 1. Fundamental Pillar (CANSLIM-7)")
+        st.markdown(
+            """
+            Evaluates growth and market leadership using William O'Neil's framework:
+            * **C:** Current EPS Growth > 15%
+            * **A:** Annual Revenue Growth > 10%
+            * **N:** Proximity to 52-Week High (within 25%)
+            * **S:** Low Volatility Base Consolidation
+            * **L:** Daily RSI > 55 (Leader status)
+            * **I:** Institutional Ownership > 30%
+            * **M:** Broad Market Health (Nifty > 200 DMA)
+            """
+        )
+
+    with col_g2:
+        st.markdown("#### 2. Technical Pillar (10-Point)")
+        st.markdown(
+            """
+            Evaluates trend strength and entry setups across Monthly, Weekly & Daily timeframes:
+            * **Moving Averages:** 200 DMA & 50 DMA upward slope.
+            * **Consolidation:** Proximity to 50/20 DMA with low price volatility.
+            * **Multi-Timeframe RSI:** Monthly, Weekly, and Daily RSI > 50 and rising.
+            * **Multi-Timeframe MACD:** Positive momentum alignment across timeframes.
+            """
+        )
+
+    with col_g3:
+        st.markdown("#### 3. Relative Strength Pillar")
+        st.markdown(
+            """
+            Measures true price outperformance over a 63-day rolling window:
+            * **RS vs Broad Market:** Outperformance relative to the Nifty 50 Index (`^NSEI`).
+            * **RS vs Sector Peers:** Outperformance relative to the stock's specific sector average return.
+            """
+        )
+
+    st.divider()
+
+    st.markdown("### 📖 Step-by-Step Usage Guide")
+
+    st.markdown("#### 🔍 Step 1: Screening Stocks")
+    st.markdown(
+        """
+        1. Open the **🔍 Stock Screener** tab.
+        2. Adjust pillar weights in the sidebar (Fundamental, Technical, Relative Strength).
+        3. Choose your universe (Default Nifty 500, upload a custom CSV, or type specific tickers).
+        4. Click **🔍 Run Screener Scan**.
+        5. Filter results using the **Min Score Filter** slider.
+        6. Click the popover on any stock ticker to inspect its pass/fail breakdown per rule.
+        """
+    )
+
+    st.markdown("#### 💼 Step 2: Evaluating Your Existing Portfolio")
+    st.markdown(
+        """
+        1. Open the **💼 Portfolio Evaluator** tab.
+        2. Upload a holdings export CSV/XLSX from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, or Kotak. *(Alternatively, paste stock tickers manually).*
+        3. Click **🚀 Evaluate Portfolio Health**.
+        4. Review your overall **Portfolio Health Score**, weak holding alerts, and export the full matrix to CSV.
+        """
+    )
+
+    st.markdown("#### 📈 Step 3: 1-Click TradingView Import")
+    st.markdown(
+        """
+        1. Filter your screening results to your desired threshold (e.g., Score $\ge 6.0$).
+        2. Hover over the text box in the **TradingView 1-Click Clipboard Exporter** section at the top of the screener results.
+        3. Click the **Copy button** (📋) in the top-right corner of the code box.
+        4. Open [TradingView](https://www.tradingview.com), open any Watchlist, click **+ (Add Symbol)** or **Import Watchlist**, and paste directly (`Ctrl+V` / `Cmd+V`).
+        """
+    )
 
 # ----------------------------------------------------------------------------------
 # Footer
