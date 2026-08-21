@@ -164,7 +164,7 @@ def customize_rs_modal():
 
 
 # ----------------------------------------------------------------------------------
-# Data Fetching & Resampling (Cached with 1-Hour Time-to-Live)
+# Data Fetching & Resampling
 # ----------------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
@@ -240,13 +240,9 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
     inst_hold = info.get("heldPercentInstitutions")
 
-    # C
     raw_results["C"] = bool(eps_growth is not None and eps_growth > 0.15)
-    # A
     raw_results["A"] = bool(rev_growth is not None and rev_growth > 0.10)
-    # N
     raw_results["N"] = bool(fifty2_high and current_price and current_price >= 0.75 * fifty2_high)
-    # S
     if daily is not None and len(daily) >= 50:
         close = daily["Close"]
         sma50 = close.rolling(50).mean().iloc[-1]
@@ -255,15 +251,15 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["S"] = bool(near_50 <= 5 and vol_std <= 6)
     else:
         raw_results["S"] = False
-    # L
+
     if daily is not None and len(daily) >= 14:
         rsi = ta.rsi(daily["Close"], length=14)
         raw_results["L"] = bool(rsi is not None and not rsi.empty and rsi.iloc[-1] > 55)
     else:
         raw_results["L"] = False
-    # I
+
     raw_results["I"] = bool(inst_hold is not None and inst_hold > 0.30)
-    # M
+
     if bench_daily is not None and len(bench_daily) >= 200:
         bench_close = bench_daily["Close"]
         bench_sma200 = bench_close.rolling(200).mean().iloc[-1]
@@ -316,41 +312,24 @@ def compute_technical_score(daily: pd.DataFrame):
     macd_d = ta.macd(close) if len(close) > 3 else None
 
     raw = {}
-    
-    # T1: Close > 200 DMA & near 50 DMA
     near_50_pct = abs(last_close - sma50) / sma50 * 100 if pd.notna(sma50) else 99
     raw["T1"] = bool(pd.notna(sma200) and last_close > sma200 and near_50_pct <= 5)
 
-    # T2: Tight consolidation near 50 or 20 DMA
     vol_pct = close.tail(10).std() / close.tail(10).mean() * 100
     near_20_pct = abs(last_close - sma20) / sma20 * 100 if pd.notna(sma20) else 99
     raw["T2"] = bool((near_50_pct <= 5 or near_20_pct <= 5) and vol_pct <= 6)
-
-    # T3: Early Stage 2 Proximity
     raw["T3"] = bool(pd.notna(sma200) and last_close <= 1.25 * sma200 and last_close > sma200)
-
-    # T4: Slopes of 50 and 200 DMA
     raw["T4"] = bool(slope_up(d["SMA50"], 5) and slope_up(d["SMA200"], 5))
-
-    # T5: Monthly RSI > 50 & rising
     raw["T5"] = bool(rsi_monthly is not None and not rsi_monthly.empty and rsi_monthly.iloc[-1] > 50 and is_rising(rsi_monthly, 2))
-
-    # T6: Weekly RSI > 50 & rising
     raw["T6"] = bool(rsi_weekly is not None and not rsi_weekly.empty and rsi_weekly.iloc[-1] > 50 and is_rising(rsi_weekly, 2))
-
-    # T7: Daily RSI > 50 & rising
     raw["T7"] = bool(pd.notna(rsi_daily) and rsi_daily > 50 and is_rising(d["RSI14"], 2))
-
-    # T8: Monthly MACD rising
     raw["T8"] = bool(macd_m is not None and not macd_m.empty and is_rising(macd_m.iloc[:, 0], 2))
 
-    # T9: Weekly MACD positive cross & rising
     if macd_w is not None and not macd_w.empty:
         raw["T9"] = bool(macd_w.iloc[-1, 0] > macd_w.iloc[-1, 2] and macd_w.iloc[-1, 0] > 0 and is_rising(macd_w.iloc[:, 0], 2))
     else:
         raw["T9"] = False
 
-    # T10: Daily MACD line rising
     raw["T10"] = bool(macd_d is not None and not macd_d.empty and is_rising(macd_d.iloc[:, 0], 2))
 
     active_passed = 0
@@ -437,7 +416,6 @@ universe = list(dict.fromkeys(selected_universe + custom_tickers))
 
 st.sidebar.divider()
 
-# Default Weights set to 4, 4, 2
 st.sidebar.subheader("2. Pillar Weights (Auto-Sum to 10)")
 w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, 4, key="w_fund")
 w_tech = st.sidebar.slider("Technical Weight", 0, 10, 4, key="w_tech")
@@ -545,34 +523,26 @@ if "results_df" in st.session_state:
         col3.metric("Avg Total Score", f"{df['Total Score'].mean():.2f}")
 
         st.subheader("📋 Screening Results")
-        st.info("💡 **Click on symbol to know more** — Expand the detailed breakdown popover in the last column of any stock row to view individual parameter hit rates.")
+        st.info("💡 **Click on symbol to know more** — Tap any stock ticker symbol directly to launch its detailed parameter evaluation modal.")
         
         display_cols = [
             "Ticker", "Total Score", "Fundamental Score", "Technical Score", "Relative Strength Score",
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]
 
-        # Detailed breakdown modal column table rendering
-        cols = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2, 1.5])
-        headers = ["Ticker", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector", "Details"]
+        # Table Header Layout without extra "Details" column
+        cols = st.columns([2.0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+        headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
         for c, h in zip(cols, headers):
             c.markdown(f"**{h}**")
         st.divider()
 
+        # Render rows: Column 1 becomes the direct click trigger popover button
         for idx, row in df.iterrows():
-            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = st.columns([1.5, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2, 1.5])
-            c1.write(row['Ticker'])
-            c2.write(f"**{row['Total Score']:.2f}**")
-            c3.write(f"{row['Fundamental Score']:.2f}")
-            c4.write(f"{row['Technical Score']:.2f}")
-            c5.write(f"{row['Relative Strength Score']:.2f}")
-            c6.write(row['Tech Passed'])
-            c7.write(row['CANSLIM Hits'])
-            c8.write(row['RS Details'])
-            c9.write(row['Sector'])
-
-            with c10:
-                with st.popover("📊 Parameter Details"):
+            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([2.0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.8, 2.2, 1.2])
+            
+            with c1:
+                with st.popover(f"🔍 {row['Ticker']}", use_container_width=True):
                     st.subheader(f"Parameter Scoring Breakdown: {row['Ticker']}")
                     
                     # 1. CANSLIM-7 Breakdown
@@ -619,6 +589,15 @@ if "results_df" in st.session_state:
                         }
                     ]
                     st.dataframe(pd.DataFrame(rs_table), hide_index=True, use_container_width=True)
+
+            c2.write(f"**{row['Total Score']:.2f}**")
+            c3.write(f"{row['Fundamental Score']:.2f}")
+            c4.write(f"{row['Technical Score']:.2f}")
+            c5.write(f"{row['Relative Strength Score']:.2f}")
+            c6.write(row['Tech Passed'])
+            c7.write(row['CANSLIM Hits'])
+            c8.write(row['RS Details'])
+            c9.write(row['Sector'])
 
         st.divider()
 
