@@ -32,12 +32,14 @@ st.markdown(
     <style>
     div[data-testid="stMetricValue"] { font-weight: 600; }
     button[data-testid="stBaseButton-popover"] {
-        padding-top: 0.2rem;
-        padding-bottom: 0.2rem;
+        padding-top: 0.15rem;
+        padding-bottom: 0.15rem;
         font-weight: 600;
     }
     div[data-testid="column"] {
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     </style>
     """,
@@ -48,9 +50,30 @@ st.title("📊 NSE Stock Screener — Interactive Engine")
 st.caption("Customizable Fundamental (CANSLIM-7) + Technical (10-Point) + Relative Strength Scoring System.")
 
 # ----------------------------------------------------------------------------------
-# Constants & Nifty 500 Default Fetcher
+# Constants & Helpers
 # ----------------------------------------------------------------------------------
 BENCHMARK = "^NSEI"
+
+SECTOR_MAP = {
+    "Financial Services": "Fin Services",
+    "Consumer Cyclical": "Cons Cyclical",
+    "Consumer Defensive": "Cons Defensive",
+    "Healthcare": "Healthcare",
+    "Technology": "Tech",
+    "Industrials": "Industrials",
+    "Basic Materials": "Materials",
+    "Energy": "Energy",
+    "Utilities": "Utilities",
+    "Real Estate": "Real Estate",
+    "Communication Services": "Comm Services",
+    "Unknown": "Unknown"
+}
+
+def abbreviate_sector(sector_raw: str) -> str:
+    if not sector_raw or sector_raw == "Unknown":
+        return "Unknown"
+    return SECTOR_MAP.get(sector_raw.strip(), sector_raw.strip())
+
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_default_nifty500():
@@ -277,7 +300,7 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
                 passed_labels.append(k)
 
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
-    status_str = ", ".join(passed_labels) if passed_labels else "None"
+    status_str = ",".join(passed_labels) if passed_labels else "None"
     
     return round(norm_score, 2), status_str, raw_results
 
@@ -347,7 +370,7 @@ def compute_technical_score(daily: pd.DataFrame):
 
 def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFrame, sector_avg_ret: float, lookback: int = 63):
     if daily is None or bench_daily is None or len(daily) < 10 or len(bench_daily) < 10:
-        return 0.0, "Broad: N/A | Sector: N/A", {}
+        return 0.0, "B:N/A | S:N/A", {}
 
     n = min(lookback, len(daily) - 1, len(bench_daily) - 1)
     stock_ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-n] - 1) * 100
@@ -371,7 +394,7 @@ def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFra
         pts_max += 5.0
 
     norm_score = (pts_earned / pts_max * 10) if pts_max > 0 else 0.0
-    status_str = f"Broad: {outperform_bench:+.1f}% | Sector: {outperform_sector:+.1f}%"
+    status_str = f"B:{outperform_bench:+.1f}% | S:{outperform_sector:+.1f}%"
 
     raw_rs = {
         "RS1_score": round(score_rs1, 2),
@@ -481,8 +504,9 @@ if run_scan:
                 
                 daily = stock_data[tkr]["daily"]
                 info = stock_data[tkr]["info"]
-                sec = info.get("sector", "Unknown")
-                sec_ret = sector_avg.get(sec, np.nan)
+                raw_sec = info.get("sector", "Unknown")
+                sec_abbrev = abbreviate_sector(raw_sec)
+                sec_ret = sector_avg.get(raw_sec, np.nan)
 
                 fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily)
                 tech_score, tech_status, raw_tech = compute_technical_score(daily)
@@ -499,7 +523,7 @@ if run_scan:
                     "Tech Passed": tech_status,
                     "CANSLIM Hits": fund_status,
                     "RS Details": rs_status,
-                    "Sector": sec,
+                    "Sector": sec_abbrev,
                     "raw_fund": raw_fund,
                     "raw_tech": raw_tech,
                     "raw_rs": raw_rs,
@@ -528,8 +552,8 @@ if "results_df" in st.session_state:
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]
 
-        # Optimized column ratio to enforce single-line rendering
-        col_ratios = [1.6, 0.8, 0.8, 0.8, 0.8, 1.0, 1.5, 2.5, 1.2]
+        # Squeezed column ratios: minimal space for numeric scores, maximum for text
+        col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
         
         cols = st.columns(col_ratios)
         headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
