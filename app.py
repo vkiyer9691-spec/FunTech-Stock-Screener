@@ -1,12 +1,3 @@
-"""
-NSE Stock Screener — Interactive Analysis Engine (Auth Gated, Admin Enabled & Supabase Persisted)
-----------------------------------------------------------------------------------
-Includes Enforced Main-Screen Supabase Authentication, Settings Persistence (Save/Load),
-Admin Email Privilege Checking, Mobile-First Responsive CSS, Multi-Broker Auto-Parser, 
-API Data-Drop Protection, and 1-Click TradingView Exporter.
-
-Run with: streamlit run app.py
-"""
 
 import os
 import time
@@ -1002,7 +993,8 @@ with tab_portfolio:
         raw_pasted = st.text_area("Paste symbols (comma, space, or line separated):", placeholder="TATAMOTORS, HDFCBANK, TRENT, AUBANK", height=100)
         
         if raw_pasted.strip():
-            delimiters = [",", "\n", " ", ";"]
+            delimiters = [",", "
+", " ", ";"]
             temp_str = raw_pasted
             for d in delimiters:
                 temp_str = temp_str.replace(d, "|")
@@ -1195,7 +1187,7 @@ if user_is_admin and tab_admin is not None:
             if supabase:
                 try:
                     users_list = []
-                    # Query user settings records to reliably populate registered users
+                    # Try querying user settings (respects RLS)
                     res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
                     if res.data:
                         for row in res.data:
@@ -1206,6 +1198,17 @@ if user_is_admin and tab_admin is not None:
                                 "Technical Weight": row.get("w_tech"),
                                 "Last Updated": row.get("updated_at")
                             })
+
+                    # Fallback or inclusion of current logged-in admin if table is empty due to RLS
+                    if not users_list and current_user:
+                        uid = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", "local-admin")
+                        users_list.append({
+                            "User ID": uid,
+                            "Profile Status": "Active Session (Admin)",
+                            "Fundamental Weight": st.session_state.get("w_fund", 4),
+                            "Technical Weight": st.session_state.get("w_tech", 4),
+                            "Last Updated": "Current Session"
+                        })
 
                     if users_list:
                         st.dataframe(pd.DataFrame(users_list), use_container_width=True, hide_index=True)
