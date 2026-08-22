@@ -92,7 +92,6 @@ def abbreviate_sector(sector_raw: str) -> str:
 
 
 def parse_broker_symbols(df: pd.DataFrame) -> list:
-    """Auto-detects symbol/ticker column from popular Indian broker CSV/XLSX exports."""
     matched_col = None
     cleaned_cols = {str(c).strip().lower(): c for c in df.columns}
     
@@ -164,7 +163,7 @@ DEFAULT_RS_PARAMS = {
 }
 
 # ----------------------------------------------------------------------------------
-# Browser LocalStorage Integration & State Initialization
+# State Initialization
 # ----------------------------------------------------------------------------------
 for p_key in DEFAULT_FUND_PARAMS:
     if f"fund_{p_key}" not in st.session_state:
@@ -178,30 +177,37 @@ for p_key in DEFAULT_RS_PARAMS:
     if f"rs_{p_key}" not in st.session_state:
         st.session_state[f"rs_{p_key}"] = True
 
-if "w_fund" not in st.session_state:
-    st.session_state["w_fund"] = 4
-if "w_tech" not in st.session_state:
-    st.session_state["w_tech"] = 4
+if "slider_fund" not in st.session_state:
+    st.session_state["slider_fund"] = 4
+if "slider_tech" not in st.session_state:
+    st.session_state["slider_tech"] = 4
 
+# Load initial state from URL parameters if available
 query_params = st.query_params
 if "app_cfg" in query_params:
     try:
         cfg = json.loads(query_params["app_cfg"])
-        if "w_fund" in cfg: st.session_state["w_fund"] = int(cfg["w_fund"])
-        if "w_tech" in cfg: st.session_state["w_tech"] = int(cfg["w_tech"])
+        if "slider_fund" in cfg and "loaded_from_url" not in st.session_state:
+            st.session_state["slider_fund"] = int(cfg["slider_fund"])
+        if "slider_tech" in cfg and "loaded_from_url" not in st.session_state:
+            st.session_state["slider_tech"] = int(cfg["slider_tech"])
         for k in DEFAULT_FUND_PARAMS:
-            if f"fund_{k}" in cfg: st.session_state[f"fund_{k}"] = bool(cfg[f"fund_{k}"])
+            if f"fund_{k}" in cfg and "loaded_from_url" not in st.session_state:
+                st.session_state[f"fund_{k}"] = bool(cfg[f"fund_{k}"])
         for k in DEFAULT_TECH_PARAMS:
-            if f"tech_{k}" in cfg: st.session_state[f"tech_{k}"] = bool(cfg[f"tech_{k}"])
+            if f"tech_{k}" in cfg and "loaded_from_url" not in st.session_state:
+                st.session_state[f"tech_{k}"] = bool(cfg[f"tech_{k}"])
         for k in DEFAULT_RS_PARAMS:
-            if f"rs_{k}" in cfg: st.session_state[f"rs_{k}"] = bool(cfg[f"rs_{k}"])
+            if f"rs_{k}" in cfg and "loaded_from_url" not in st.session_state:
+                st.session_state[f"rs_{k}"] = bool(cfg[f"rs_{k}"])
+        st.session_state["loaded_from_url"] = True
     except Exception:
         pass
 
 def sync_settings_to_browser():
     save_dict = {
-        "w_fund": st.session_state.get("w_fund", 4),
-        "w_tech": st.session_state.get("w_tech", 4),
+        "slider_fund": st.session_state.get("slider_fund", 4),
+        "slider_tech": st.session_state.get("slider_tech", 4),
     }
     for k in DEFAULT_FUND_PARAMS: save_dict[f"fund_{k}"] = st.session_state.get(f"fund_{k}", True)
     for k in DEFAULT_TECH_PARAMS: save_dict[f"tech_{k}"] = st.session_state.get(f"tech_{k}", True)
@@ -213,70 +219,90 @@ def sync_settings_to_browser():
     localStorage.setItem('screener_user_settings', JSON.stringify(settings));
     
     const urlParams = new URLSearchParams(window.parent.location.search);
-    if (!urlParams.has('app_cfg')) {{
-        urlParams.set('app_cfg', JSON.stringify(settings));
-        window.parent.history.replaceState({{}}, '', '?' + urlParams.toString());
-    }}
+    urlParams.set('app_cfg', JSON.stringify(settings));
+    window.parent.history.replaceState({{}}, '', '?' + urlParams.toString());
     </script>
     """
     components.html(js_code, height=0, width=0)
 
-sync_settings_to_browser()
-
 # ----------------------------------------------------------------------------------
-# Dialog Modals (Fixed State Persistence)
+# Dialog Modals (Fixed State Synchronization)
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
 def customize_fundamental_modal():
     st.write("Select which CANSLIM-7 criteria to include in the Fundamental Score calculation:")
-    new_fund_vals = {}
+    
+    current_states = {}
     for k, label in DEFAULT_FUND_PARAMS.items():
-        new_fund_vals[k] = st.checkbox(label, value=st.session_state.get(f"fund_{k}", True), key=f"chk_fund_{k}")
+        current_states[k] = st.checkbox(
+            label, 
+            value=st.session_state.get(f"fund_{k}", True), 
+            key=f"modal_chk_fund_{k}"
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_fund", use_container_width=True):
+    if col1.button("Restore Defaults", key="btn_reset_fund", use_container_width=True):
         for k in DEFAULT_FUND_PARAMS:
             st.session_state[f"fund_{k}"] = True
+        sync_settings_to_browser()
         st.rerun()
-    if col2.button("Apply & Close", key="apply_fund", use_container_width=True):
-        for k, v in new_fund_vals.items():
+        
+    if col2.button("Apply & Close", key="btn_apply_fund", use_container_width=True):
+        for k, v in current_states.items():
             st.session_state[f"fund_{k}"] = v
+        sync_settings_to_browser()
         st.rerun()
 
 
 @st.dialog("⚙️ Customize Technical Parameters")
 def customize_technical_modal():
     st.write("Select which rules to include in the 10-Point Technical Score calculation:")
-    new_tech_vals = {}
+    
+    current_states = {}
     for k, label in DEFAULT_TECH_PARAMS.items():
-        new_tech_vals[k] = st.checkbox(label, value=st.session_state.get(f"tech_{k}", True), key=f"chk_tech_{k}")
+        current_states[k] = st.checkbox(
+            label, 
+            value=st.session_state.get(f"tech_{k}", True), 
+            key=f"modal_chk_tech_{k}"
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_tech", use_container_width=True):
+    if col1.button("Restore Defaults", key="btn_reset_tech", use_container_width=True):
         for k in DEFAULT_TECH_PARAMS:
             st.session_state[f"tech_{k}"] = True
+        sync_settings_to_browser()
         st.rerun()
-    if col2.button("Apply & Close", key="apply_tech", use_container_width=True):
-        for k, v in new_tech_vals.items():
+        
+    if col2.button("Apply & Close", key="btn_apply_tech", use_container_width=True):
+        for k, v in current_states.items():
             st.session_state[f"tech_{k}"] = v
+        sync_settings_to_browser()
         st.rerun()
 
 
 @st.dialog("⚙️ Customize Relative Strength Parameters")
 def customize_rs_modal():
     st.write("Select which relative strength benchmarks to include:")
-    new_rs_vals = {}
+    
+    current_states = {}
     for k, label in DEFAULT_RS_PARAMS.items():
-        new_rs_vals[k] = st.checkbox(label, value=st.session_state.get(f"rs_{k}", True), key=f"chk_rs_{k}")
+        current_states[k] = st.checkbox(
+            label, 
+            value=st.session_state.get(f"rs_{k}", True), 
+            key=f"modal_chk_rs_{k}"
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_rs", use_container_width=True):
+    if col1.button("Restore Defaults", key="btn_reset_rs", use_container_width=True):
         for k in DEFAULT_RS_PARAMS:
             st.session_state[f"rs_{k}"] = True
+        sync_settings_to_browser()
         st.rerun()
-    if col2.button("Apply & Close", key="apply_rs", use_container_width=True):
-        for k, v in new_rs_vals.items():
+        
+    if col2.button("Apply & Close", key="btn_apply_rs", use_container_width=True):
+        for k, v in current_states.items():
             st.session_state[f"rs_{k}"] = v
+        sync_settings_to_browser()
         st.rerun()
 
 # ----------------------------------------------------------------------------------
@@ -596,14 +622,38 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
     return pd.DataFrame(results), skipped, data_drop_flag
 
 # ----------------------------------------------------------------------------------
-# Sidebar Controls (Fixed Slider Keying)
+# Sidebar Controls (Decoupled Key Management for Sliders)
 # ----------------------------------------------------------------------------------
 st.sidebar.header("⚙️ Engine Controls")
 
 st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
 
-w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, key="w_fund")
-w_tech = st.sidebar.slider("Technical Weight", 0, 10, key="w_tech")
+def update_fund_weight():
+    st.session_state["slider_fund"] = st.session_state["_fund_slider_input"]
+    sync_settings_to_browser()
+
+def update_tech_weight():
+    st.session_state["slider_tech"] = st.session_state["_tech_slider_input"]
+    sync_settings_to_browser()
+
+w_fund = st.sidebar.slider(
+    "Fundamental Weight", 
+    min_value=0, 
+    max_value=10, 
+    value=st.session_state["slider_fund"], 
+    key="_fund_slider_input",
+    on_change=update_fund_weight
+)
+
+w_tech = st.sidebar.slider(
+    "Technical Weight", 
+    min_value=0, 
+    max_value=10, 
+    value=st.session_state["slider_tech"], 
+    key="_tech_slider_input",
+    on_change=update_tech_weight
+)
+
 w_rs_calc = 10 - w_fund - w_tech
 
 if w_rs_calc < 0:
