@@ -21,19 +21,6 @@ import streamlit as st
 import yfinance as yf
 import pandas_ta as ta
 
-# Add this temporarily near the top of app.py to inspect secret parsing
-with st.sidebar.expander("🔑 Supabase Key Diagnostics", expanded=True):
-    raw_url = str(st.secrets.get("SUPABASE_URL") or "")
-    raw_key = str(st.secrets.get("SUPABASE_KEY") or "")
-    
-    st.write(f"**URL Found:** `{bool(raw_url)}` (Length: {len(raw_url)})")
-    st.write(f"**Key Found:** `{bool(raw_key)}` (Length: {len(raw_key)})")
-    
-    if raw_key:
-        st.write(f"**Key Prefix:** `{raw_key[:12]}...`")
-        st.write(f"**Key Suffix:** `...{raw_key[-6:]}`")
-        st.write(f"**Contains Spaces/Newlines:** `{(' ' in raw_key) or ('\\n' in raw_key)}`")
- # Add this temporarily near the top of app.py to inspect secret parsing
        
 
 # Optional Supabase Import with Graceful Fallback
