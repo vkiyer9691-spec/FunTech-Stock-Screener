@@ -3,7 +3,7 @@ NSE Stock Screener — Interactive Analysis Engine (Auth Gated, Admin Enabled & 
 ----------------------------------------------------------------------------------
 Includes Enforced Main-Screen Supabase Authentication, Settings Persistence (Save/Load),
 Admin Email Privilege Checking, Mobile-First Responsive CSS, Multi-Broker Auto-Parser, 
-API Data-Drop Protection, 1-Click TradingView Exporter, and User Guide.
+API Data-Drop Protection, 1-Click TradingView Exporter, and Interactive Simulation Guides.
 
 Run with: streamlit run app.py
 """
@@ -56,6 +56,14 @@ st.markdown(
         font-weight: 600;
         width: 100% !important;
         min-height: 44px !important;
+    }
+    .sim-card {
+        background-color: #1e293b;
+        border-left: 4px solid #3b82f6;
+        padding: 1rem;
+        border-radius: 0.375rem;
+        margin-bottom: 1rem;
+        color: #f8fafc;
     }
     @media only screen and (max-width: 768px) {
         div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: 1rem !important; }
@@ -1088,133 +1096,201 @@ with tab_portfolio:
         )
 
 # ==================================================================================
-# TAB 3: USER GUIDE
+# TAB 3: USER GUIDE (WITH SIMULATION-STYLE STEP CARDS)
 # ==================================================================================
 with tab_guide:
-    st.subheader("ℹ️ Application Overview & Detailed User Guide")
+    st.subheader("ℹ️ Interactive Step-by-Step Simulation Guide")
     st.markdown(
         """
-        Welcome to the **Quantitative Multi-Pillar Engine**. This tool enables Indian stock market 
-        traders and investors to systematically screen market universes and evaluate existing portfolio holdings 
-        using an objective, rules-based quantitative model.
+        Welcome to the **Quantitative Multi-Pillar Engine**. Below are interactive, Articulate-style 
+        step-by-step simulation modules explaining how to execute every core task in the application.
         """
     )
 
     st.divider()
 
-    st.markdown("### 🛠️ How to Use the Engine Features")
-
-    st.markdown("#### 1. Stock Screener Tab")
-    st.markdown(
-        """
-        * **Universe Selection:** Select the pre-loaded **Nifty 500** universe from the sidebar, type individual custom ticker symbols, or upload a custom CSV file.
-        * **Running Scans:** Click **Run Screener Scan** to pull live market history and fundamental metrics.
-        * **1-Click TradingView Sync:** Use the min-score slider to filter high-performing stocks and copy formatted symbol lists (`NSE:TRENT,NSE:HAL`) directly into TradingView watchlists.
-        * **Interactive Symbol Inspection:** Select any ticker and click **🔍 Breakdown** to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
-        """
+    guide_mode = st.radio(
+        "Choose Simulation Module:", 
+        [
+            "1. Running a Stock Universe Scan", 
+            "2. Auto-Parsing Broker Portfolio Holdings", 
+            "3. Inspecting Pillar Score Breakdowns", 
+            "4. Exporting Watchlists to TradingView"
+        ],
+        horizontal=True
     )
 
-    st.markdown("#### 2. Portfolio Health Evaluator Tab")
-    st.markdown(
-        """
-        * **Auto-Parse Broker Holdings:** Upload raw portfolio export files directly from major Indian brokers (Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, Kotak). The engine automatically detects header columns like `Trading Symbol`, `Scrip Name`, or `Instrument`.
-        * **Text Paste Option:** Alternatively, copy and paste comma-separated stock symbols directly.
-        * **Health Scoring:** Identifies weak holdings (Score < 5.0) and strong leadership candidates (Score ≥ 7.0), allowing you to prune underperforming positions.
-        """
-    )
+    st.markdown("---")
 
-    st.markdown("#### 3. Pillar Weights & Rule Customization (Sidebar)")
-    st.markdown(
-        """
-        * **Weight Distribution:** Adjust sliders in the sidebar to control how much weight is given to Fundamentals, Technicals, and Relative Strength (must sum to 10).
-        * **Rule Toggles:** Click the popup buttons under *Pillar Customization* to enable or disable individual rules. Your preferences automatically persist across sessions via Supabase database sync.
-        """
-    )
-
-    st.divider()
-
-    st.markdown("### 🏛️ Deep Dive: The 3 Quantitative Pillars")
-
-    col_g1, col_g2, col_g3 = st.columns(3)
-
-    with col_g1:
-        st.markdown("#### 1. Fundamental Pillar (CANSLIM-7)")
+    if "1. Running" in guide_mode:
+        st.markdown("### 🎥 Simulation: Running a Stock Universe Scan")
         st.markdown(
             """
-            * **C:** Current Quarterly EPS Growth > 15%
-            * **A:** Annual Revenue Growth > 10%
-            * **N:** Price within 25% of 52-Week High
-            * **S:** Tight consolidation base near 50 DMA
-            * **L:** Leader Relative Strength (Daily RSI > 55)
-            * **I:** Institutional Ownership > 30%
-            * **M:** Broad Market Direction (Nifty 50 > 200 DMA)
-            """
+            <div class="sim-card">
+            <b>Step 1: Open Sidebar Controls</b><br>
+            Locate the sidebar on the left side of your screen and expand the <b>3. Screener Universe</b> section.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 2: Choose Universe or Upload CSV</b><br>
+            By default, the engine loads the <b>Nifty 500</b> ticker list. You can optionally expand <i>Upload Custom CSV List</i> to drop your own broker or custom stock export file.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 3: Execute Scan</b><br>
+            Click the primary action button labeled <b>🔍 Run Screener Scan</b> in the sidebar. The progress bar will indicate live evaluation status across your chosen universe.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 4: Analyze Results</b><br>
+            Once completed, review summary metrics (Total Score, Highest Scorer, Average Score) and sort or inspect the screening table directly.
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-    with col_g2:
-        st.markdown("#### 2. Technical Momentum Pillar")
+    elif "2. Auto-Parsing" in guide_mode:
+        st.markdown("### 🎥 Simulation: Auto-Parsing Broker Portfolio Holdings")
         st.markdown(
             """
-            * **T1–T4 (Trend Alignment):** Price relative to 200/50/20 DMAs and upward sloped moving average structures.
-            * **T5–T7 (Multi-Timeframe RSI):** Monthly, Weekly, and Daily RSI levels > 50 and rising.
-            * **T8–T10 (MACD Momentum):** Positive MACD line momentum and crossovers across Daily, Weekly, and Monthly charts.
-            """
+            <div class="sim-card">
+            <b>Step 1: Navigate to Portfolio Evaluator Tab</b><br>
+            Click on the <b>💼 Portfolio Evaluator</b> tab at the top of the application dashboard.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 2: Upload Broker Export File (Option A)</b><br>
+            Upload your raw holdings export CSV or Excel file downloaded straight from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, or Kotak. The multi-broker parser auto-detects column labels like <i>Trading Symbol</i> or <i>Scrip Name</i>.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 3: Alternative Text Paste (Option B)</b><br>
+            Alternatively, paste stock symbols directly into the text box (comma, space, or line separated).
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 4: Run Health Evaluation</b><br>
+            Click <b>🚀 Evaluate Portfolio Health</b> to score all holdings against the 3-pillar quantitative model.
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-    with col_g3:
-        st.markdown("#### 3. Relative Strength Pillar")
+    elif "3. Inspecting" in guide_mode:
+        st.markdown("### 🎥 Simulation: Inspecting Pillar Score Breakdowns")
         st.markdown(
             """
-            * **RS1 (Market Alpha):** Measures 3-month (63 trading days) price return outperformance against the Nifty 50 (^NSEI).
-            * **RS2 (Sector Alpha):** Measures 3-month price return outperformance against the stock's specific industry sector average.
+            <div class="sim-card">
+            <b>Step 1: Locate the Inspection Toolbar</b><br>
+            In either the <b>Stock Screener</b> or <b>Portfolio Evaluator</b> tabs, find the horizontal inspection toolbar located right above the data table.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 2: Select Target Symbol</b><br>
+            Use the dropdown selector box (<i>Select Stock to Inspect</i>) to highlight your stock of interest.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 3: Open Detailed Breakdown</b><br>
+            Click the primary <b>🔍 Breakdown</b> action button next to the selector.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 4: Review Rule-by-Rule Status</b><br>
+            An interactive modal popup will appear displaying exact pass/fail results for CANSLIM fundamentals, technical momentum indicators, and relative strength alpha calculations.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    else:
+        st.markdown("### 🎥 Simulation: Exporting Watchlists to TradingView")
+        st.markdown(
             """
+            <div class="sim-card">
+            <b>Step 1: Run Screener Analysis</b><br>
+            Ensure your screener scan has completed successfully on your chosen universe in the <b>Stock Screener</b> tab.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 2: Adjust Minimum Score Threshold</b><br>
+            Use the slider under the <i>TradingView 1-Click Clipboard Exporter</i> header to filter high-performing stocks (e.g., Score $\ge 6.0$).
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 3: Copy Formats to Clipboard</b><br>
+            The engine automatically formats matching tickers with proper exchange prefixes (e.g., `NSE:TRENT,NSE:HAL`). Click the copy icon on the code box.
+            </div>
+            
+            <div class="sim-card">
+            <b>Step 4: Paste into TradingView</b><br>
+            Open TradingView, navigate to your Watchlist, click the list options menu, and paste directly into the symbol input box.
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
 # ==================================================================================
-# TAB 4: ADMIN PANEL (RESTRICTED ACCESS)
+# TAB 4: ADMIN PANEL (RESTRICTED ACCESS WITH USER TABLE & METRICS)
 # ==================================================================================
 if user_is_admin and tab_admin is not None:
     with tab_admin:
-        st.subheader("🛠️ Administrator Control & Database Inspection")
-        st.success(f"Authenticated as Admin: `{user_email}`")
+        st.subheader("🛠️ Administrator Control & User Management Dashboard")
+        st.success(f"Authenticated as Administrator: `{user_email}`")
         
         st.divider()
         
         col_adm1, col_adm2 = st.columns([1, 1])
         
         with col_adm1:
-            st.markdown("#### 📊 System Status & Active Session")
+            st.markdown("#### 📊 System Metrics & Diagnostics")
             st.json({
-                "User Email": user_email,
-                "Is Admin": True,
-                "Supabase Connected": SUPABASE_AVAILABLE and get_supabase_client() is not None,
-                "Default Universe Size": len(DEFAULT_UNIVERSE),
-                "Active Weights": {
+                "Admin User": user_email,
+                "Supabase Connection Active": SUPABASE_AVAILABLE and get_supabase_client() is not None,
+                "Default Nifty 500 Universe Tickers": len(DEFAULT_UNIVERSE),
+                "Active Pillar Weights": {
                     "Fundamental": w_fund,
                     "Technical": w_tech,
                     "Relative Strength": w_rs
                 }
             })
             
-            if st.button("🧹 Clear Streamlit Data Cache", use_container_width=True):
+            if st.button("🧹 Clear Global Streamlit Data Cache", use_container_width=True):
                 st.cache_data.clear()
                 st.success("Global application cache cleared successfully.")
 
         with col_adm2:
-            st.markdown("#### 🗄️ Database Inspection (`user_settings` Table)")
+            st.markdown("#### 👥 Registered Users & Access Audit")
             supabase = get_supabase_client()
             if supabase:
                 try:
-                    res = supabase.table("user_settings").select("*").execute()
+                    # Query user settings table and construct user activity log
+                    res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
                     if res.data:
-                        admin_db_df = pd.DataFrame(res.data)
-                        st.dataframe(admin_db_df, use_container_width=True)
+                        users_audit_df = pd.DataFrame(res.data)
+                        users_audit_df.rename(columns={
+                            "user_id": "User ID",
+                            "updated_at": "Last Accessed / Configured",
+                            "w_fund": "Fund Weight",
+                            "w_tech": "Tech Weight"
+                        }, inplace=True)
+                        st.dataframe(users_audit_df, use_container_width=True, hide_index=True)
                     else:
-                        st.info("No saved user records found in `user_settings` table yet.")
+                        st.info("No active user configuration records found in database.")
                 except Exception as e:
-                    st.error(f"Error reading Supabase table: {e}")
+                    st.error(f"Error retrieving user audit records: {e}")
             else:
-                st.warning("Supabase connection unavailable in local or dev mode.")
+                st.warning("Supabase connection unavailable in local or offline mode.")
+
+        st.divider()
+        st.markdown("#### 🗄️ Raw Database Inspection (`user_settings` Table)")
+        if supabase:
+            try:
+                full_res = supabase.table("user_settings").select("*").execute()
+                if full_res.data:
+                    st.dataframe(pd.DataFrame(full_res.data), use_container_width=True)
+            except Exception as e:
+                st.error(f"Error fetching table data: {e}")
 
 # ----------------------------------------------------------------------------------
 # Footer
