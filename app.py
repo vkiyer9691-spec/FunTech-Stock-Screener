@@ -760,6 +760,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
         total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
 
         results.append({
+            "Inspect": "🔍",
             "Ticker": tkr,
             "Total Score": round(total_score, 2),
             "Fundamental Score": fund_score,
@@ -884,7 +885,7 @@ with tab_screener:
             col_tv1, col_tv2 = st.columns([1, 2])
             
             with col_tv1:
-                threshold = st.slider("Min Score Filter", 0.0, 10.0, 6.0, 0.5)
+                threshold = st.slider("Min Score Filter", 0.0, 10.0, 6.0, 0.5, key="scr_tv_thresh")
             
             filtered_df = df[df["Total Score"] >= threshold]
             tv_symbols = [f"NSE:{s.replace('.NS', '')}" for s in filtered_df["Ticker"].tolist()]
@@ -899,45 +900,39 @@ with tab_screener:
 
             st.divider()
 
-            # Interactive Breakdown Selector
-            st.subheader("🔍 Interactive Stock Inspector")
-            st.caption("Click any button below to open a full popup showing detailed parameter breakdowns for all 3 pillars.")
-            
-            btn_cols = st.columns(min(len(df), 6))
-            for idx, r in df.iterrows():
-                col_idx = idx % 6
-                sym_clean = r["Ticker"].replace(".NS", "")
-                if btn_cols[col_idx].button(f"📌 {sym_clean} ({r['Total Score']:.1f})", key=f"scr_btn_{r['Ticker']}_{idx}"):
-                    show_pillar_details_modal(r)
-
-            st.divider()
-
-            # Screening Table
+            # Screening Table with Row Selection
             st.subheader("📋 Screening Results Table")
-            st.info("💡 **Symbol name** stays frozen on the left when swiping horizontally.")
+            st.info("💡 **Select any row** in the table below to inspect its full 3-pillar breakdown in a modal window.")
 
             display_table = df[[
-                "Ticker", "Total Score", "Fundamental Score", 
+                "Inspect", "Ticker", "Total Score", "Fundamental Score", 
                 "Technical Score", "Relative Strength Score", 
                 "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
             ]].copy()
 
-            st.dataframe(
+            event = st.dataframe(
                 display_table,
                 use_container_width=True,
                 hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
                 column_config={
-                    "Ticker": st.column_config.TextColumn(
-                        "Symbol",
-                        pinned=True,
-                        width="small"
-                    ),
+                    "Inspect": st.column_config.TextColumn("🔍", pinned=True, width="small"),
+                    "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
                     "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
                     "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
                     "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
                     "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
                 }
             )
+
+            # Trigger Modal on Row Selection
+            if event and hasattr(event, "selection") and event.selection:
+                selected_rows = event.selection.get("rows", [])
+                if selected_rows:
+                    selected_idx = selected_rows[0]
+                    selected_row_data = df.iloc[selected_idx].to_dict()
+                    show_pillar_details_modal(selected_row_data)
 
 # ==================================================================================
 # TAB 2: PORTFOLIO EVALUATOR
@@ -1013,42 +1008,39 @@ with tab_portfolio:
         col_p3.metric("Weak Holdings (Score < 5.0)", len(p_weak))
 
         st.divider()
-        
-        # Interactive Inspector for Portfolio Holdings
-        st.subheader("🔍 Portfolio Holding Inspector")
-        st.caption("Click any stock symbol to inspect its detailed parameters in a popup modal.")
-        p_btn_cols = st.columns(min(len(p_results), 6))
-        for idx, r in p_results.iterrows():
-            col_idx = idx % 6
-            sym_clean = r["Ticker"].replace(".NS", "")
-            if p_btn_cols[col_idx].button(f"📌 {sym_clean} ({r['Total Score']:.1f})", key=f"port_btn_{r['Ticker']}_{idx}"):
-                show_pillar_details_modal(r)
-
-        st.divider()
         st.subheader("📊 Portfolio Scoring Matrix")
+        st.info("💡 **Select any row** in the table below to inspect its full 3-pillar breakdown in a modal window.")
 
         p_table = p_results[[
-            "Ticker", "Total Score", "Fundamental Score", 
+            "Inspect", "Ticker", "Total Score", "Fundamental Score", 
             "Technical Score", "Relative Strength Score", 
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]].copy()
 
-        st.dataframe(
+        p_event = st.dataframe(
             p_table,
             use_container_width=True,
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="port_table_event",
             column_config={
-                "Ticker": st.column_config.TextColumn(
-                    "Symbol",
-                    pinned=True,
-                    width="small"
-                ),
+                "Inspect": st.column_config.TextColumn("🔍", pinned=True, width="small"),
+                "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
                 "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
                 "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
                 "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
                 "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
             }
         )
+
+        # Trigger Modal on Row Selection in Portfolio
+        if p_event and hasattr(p_event, "selection") and p_event.selection:
+            p_selected_rows = p_event.selection.get("rows", [])
+            if p_selected_rows:
+                p_selected_idx = p_selected_rows[0]
+                p_selected_row_data = p_results.iloc[p_selected_idx].to_dict()
+                show_pillar_details_modal(p_selected_row_data)
 
         st.divider()
         st.download_button(
@@ -1082,7 +1074,7 @@ with tab_guide:
         * **Universe Selection:** Select the pre-loaded **Nifty 500** universe from the sidebar, type individual custom ticker symbols, or upload a custom CSV file.
         * **Running Scans:** Click **Run Screener Scan** to pull live market history and fundamental metrics.
         * **1-Click TradingView Sync:** Use the min-score slider to filter high-performing stocks and copy formatted symbol lists (`NSE:TRENT,NSE:HAL`) directly into TradingView watchlists.
-        * **Interactive Symbol Inspection:** Click on any symbol button in the result grid to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
+        * **Interactive Symbol Inspection:** Select any row in the results table (marked with 🔍 on the left) to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
         """
     )
 
