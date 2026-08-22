@@ -21,8 +21,6 @@ import streamlit as st
 import yfinance as yf
 import pandas_ta as ta
 
-       
-
 # Optional Supabase Import with Graceful Fallback
 try:
     from supabase import create_client, Client
@@ -42,21 +40,16 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Global Mobile Touch Targets & Typography */
     html, body, [class*="css"] {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    
-    /* Touch-friendly input fields and buttons */
     .stButton > button, .stSelectbox, .stTextInput, .stMultiSelect {
         min-height: 44px !important;
     }
-
     div[data-testid="stMetricValue"] { 
         font-weight: 600; 
         font-size: clamp(1.2rem, 4vw, 1.8rem) !important;
     }
-
     button[data-testid="stBaseButton-popover"] {
         padding-top: 0.4rem;
         padding-bottom: 0.4rem;
@@ -64,42 +57,13 @@ st.markdown(
         width: 100% !important;
         min-height: 44px !important;
     }
-
-    /* Mobile Responsive Media Queries (< 768px) */
     @media only screen and (max-width: 768px) {
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: column !important;
-            gap: 1rem !important;
-        }
-
-        div[data-testid="column"] {
-            width: 100% !important;
-            min-width: 100% !important;
-            white-space: normal !important;
-            word-break: break-word !important;
-        }
-
-        .stButton > button {
-            width: 100% !important;
-            margin-bottom: 0.5rem;
-        }
-
-        div[data-baseweb="tab-list"] {
-            gap: 2px !important;
-            width: 100% !important;
-        }
-        
-        button[data-baseweb="tab"] {
-            padding: 8px 10px !important;
-            font-size: 12px !important;
-            flex-grow: 1 !important;
-            text-align: center !important;
-        }
-
-        div[data-testid="stTable"], div[data-testid="stDataFrame"] {
-            overflow-x: auto !important;
-            -webkit-overflow-scrolling: touch;
-        }
+        div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: 1rem !important; }
+        div[data-testid="column"] { width: 100% !important; min-width: 100% !important; white-space: normal !important; word-break: break-word !important; }
+        .stButton > button { width: 100% !important; margin-bottom: 0.5rem; }
+        div[data-baseweb="tab-list"] { gap: 2px !important; width: 100% !important; }
+        button[data-baseweb="tab"] { padding: 8px 10px !important; font-size: 12px !important; flex-grow: 1 !important; text-align: center !important; }
+        div[data-testid="stTable"], div[data-testid="stDataFrame"] { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
     }
     </style>
     """,
@@ -109,8 +73,7 @@ st.markdown(
 # ----------------------------------------------------------------------------------
 # Constants, Defaults & Admin Access Control
 # ----------------------------------------------------------------------------------
-ADMIN_EMAILS = ["vkiyer@hotmail.com"]  # Add additional admin emails here if needed
-
+ADMIN_EMAILS = ["vkiyer@hotmail.com"]
 BENCHMARK = "^NSEI"
 
 DEFAULT_FUND_PARAMS = {
@@ -142,18 +105,11 @@ DEFAULT_RS_PARAMS = {
 }
 
 SECTOR_MAP = {
-    "Financial Services": "Fin Services",
-    "Consumer Cyclical": "Cons Cyclical",
-    "Consumer Defensive": "Cons Defensive",
-    "Healthcare": "Healthcare",
-    "Technology": "Tech",
-    "Industrials": "Industrials",
-    "Basic Materials": "Materials",
-    "Energy": "Energy",
-    "Utilities": "Utilities",
-    "Real Estate": "Real Estate",
-    "Communication Services": "Comm Services",
-    "Unknown": "Unknown"
+    "Financial Services": "Fin Services", "Consumer Cyclical": "Cons Cyclical",
+    "Consumer Defensive": "Cons Defensive", "Healthcare": "Healthcare",
+    "Technology": "Tech", "Industrials": "Industrials", "Basic Materials": "Materials",
+    "Energy": "Energy", "Utilities": "Utilities", "Real Estate": "Real Estate",
+    "Communication Services": "Comm Services", "Unknown": "Unknown"
 }
 
 BROKER_SYMBOL_HEADERS = [
@@ -173,10 +129,8 @@ def is_admin(user) -> bool:
 def get_supabase_client():
     if not SUPABASE_AVAILABLE:
         return None
-    
     url = str(st.secrets.get("SUPABASE_URL") or st.secrets.get("supabase", {}).get("url") or os.environ.get("SUPABASE_URL") or "").strip()
     key = str(st.secrets.get("SUPABASE_KEY") or st.secrets.get("supabase", {}).get("key") or os.environ.get("SUPABASE_KEY") or "").strip()
-
     if url and key and url != "None" and key != "None":
         try:
             return create_client(url, key)
@@ -184,31 +138,55 @@ def get_supabase_client():
             return None
     return None
 
+
+def init_session_defaults():
+    if "w_fund" not in st.session_state:
+        st.session_state["w_fund"] = 4
+    if "w_tech" not in st.session_state:
+        st.session_state["w_tech"] = 4
+
+    for k in DEFAULT_FUND_PARAMS:
+        if f"fund_{k}" not in st.session_state:
+            st.session_state[f"fund_{k}"] = True
+
+    for k in DEFAULT_TECH_PARAMS:
+        if f"tech_{k}" not in st.session_state:
+            st.session_state[f"tech_{k}"] = True
+
+    for k in DEFAULT_RS_PARAMS:
+        if f"rs_{k}" not in st.session_state:
+            st.session_state[f"rs_{k}"] = True
+
+
 def load_user_settings_from_db(user_id: str):
     supabase = get_supabase_client()
     if not supabase or not user_id:
         return
     
     try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+
         response = supabase.table("user_settings").select("*").eq("user_id", user_id).execute()
         if response.data and len(response.data) > 0:
             data = response.data[0]
-            st.session_state["w_fund"] = data.get("w_fund", 4)
-            st.session_state["w_tech"] = data.get("w_tech", 4)
+            st.session_state["w_fund"] = int(data.get("w_fund", 4))
+            st.session_state["w_tech"] = int(data.get("w_tech", 4))
             
             fund_rules = data.get("fund_rules") or {}
-            for k, val in fund_rules.items():
-                st.session_state[f"fund_{k}"] = val
+            for k in DEFAULT_FUND_PARAMS:
+                st.session_state[f"fund_{k}"] = bool(fund_rules.get(k, True))
                 
             tech_rules = data.get("tech_rules") or {}
-            for k, val in tech_rules.items():
-                st.session_state[f"tech_{k}"] = val
+            for k in DEFAULT_TECH_PARAMS:
+                st.session_state[f"tech_{k}"] = bool(tech_rules.get(k, True))
 
             rs_rules = data.get("rs_rules") or {}
-            for k, val in rs_rules.items():
-                st.session_state[f"rs_{k}"] = val
+            for k in DEFAULT_RS_PARAMS:
+                st.session_state[f"rs_{k}"] = bool(rs_rules.get(k, True))
     except Exception as e:
-        st.warning(f"Could not load saved settings from database: {e}")
+        st.warning(f"Could not load saved settings: {e}")
 
 
 def save_user_settings_to_db():
@@ -219,7 +197,6 @@ def save_user_settings_to_db():
     if not supabase or not user:
         return
 
-    # Attach the active user session token to satisfy Postgrest RLS checks
     if session and hasattr(session, "access_token"):
         supabase.postgrest.auth(session.access_token)
 
@@ -252,6 +229,7 @@ def init_auth_session():
         st.session_state["user"] = None
     if "supabase_session" not in st.session_state:
         st.session_state["supabase_session"] = None
+    init_session_defaults()
 
 
 def render_login_screen():
@@ -319,30 +297,13 @@ def render_login_screen():
 
     return False
 
-# Enforce Authentication Gate BEFORE loading sidebar or app
+# Enforce Authentication Gate
 if "user" not in st.session_state or st.session_state["user"] is None:
     render_login_screen()
     st.stop()
 
-# ----------------------------------------------------------------------------------
-# Session State Initialization (Fallback Defaults)
-# ----------------------------------------------------------------------------------
-if "w_fund" not in st.session_state:
-    st.session_state["w_fund"] = 4
-if "w_tech" not in st.session_state:
-    st.session_state["w_tech"] = 4
-
-for p_key in DEFAULT_FUND_PARAMS:
-    if f"fund_{p_key}" not in st.session_state:
-        st.session_state[f"fund_{p_key}"] = True
-
-for p_key in DEFAULT_TECH_PARAMS:
-    if f"tech_{p_key}" not in st.session_state:
-        st.session_state[f"tech_{p_key}"] = True
-
-for p_key in DEFAULT_RS_PARAMS:
-    if f"rs_{p_key}" not in st.session_state:
-        st.session_state[f"rs_{p_key}"] = True
+# Ensure user defaults exist in state
+init_session_defaults()
 
 # ----------------------------------------------------------------------------------
 # Main App Header & User Info
@@ -362,8 +323,7 @@ if st.sidebar.button("🚪 Log Out", use_container_width=True):
             supabase.auth.sign_out()
         except Exception:
             pass
-    st.session_state["user"] = None
-    st.session_state["supabase_session"] = None
+    st.session_state.clear()
     st.rerun()
 
 st.sidebar.divider()
@@ -430,7 +390,7 @@ DEFAULT_UNIVERSE = load_default_nifty500()
 def customize_fundamental_modal():
     st.write("Select CANSLIM-7 criteria to include:")
     for k, label in DEFAULT_FUND_PARAMS.items():
-        st.session_state[f"fund_{k}"] = st.checkbox(label, value=st.session_state[f"fund_{k}"])
+        st.session_state[f"fund_{k}"] = st.checkbox(label, value=st.session_state.get(f"fund_{k}", True))
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_fund"):
@@ -447,7 +407,7 @@ def customize_fundamental_modal():
 def customize_technical_modal():
     st.write("Select rules to include in Technical Score:")
     for k, label in DEFAULT_TECH_PARAMS.items():
-        st.session_state[f"tech_{k}"] = st.checkbox(label, value=st.session_state[f"tech_{k}"])
+        st.session_state[f"tech_{k}"] = st.checkbox(label, value=st.session_state.get(f"tech_{k}", True))
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_tech"):
@@ -464,7 +424,7 @@ def customize_technical_modal():
 def customize_rs_modal():
     st.write("Select relative strength benchmarks to include:")
     for k, label in DEFAULT_RS_PARAMS.items():
-        st.session_state[f"rs_{k}"] = st.checkbox(label, value=st.session_state[f"rs_{k}"])
+        st.session_state[f"rs_{k}"] = st.checkbox(label, value=st.session_state.get(f"rs_{k}", True))
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_rs"):
@@ -788,11 +748,14 @@ st.sidebar.header("⚙️ Engine Controls")
 
 st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
 
+def on_weight_change():
+    save_user_settings_to_db()
+
 w_fund = st.sidebar.slider(
-    "Fundamental Weight", 0, 10, key="w_fund", on_change=save_user_settings_to_db
+    "Fundamental Weight", 0, 10, key="w_fund", on_change=on_weight_change
 )
 w_tech = st.sidebar.slider(
-    "Technical Weight", 0, 10, key="w_tech", on_change=save_user_settings_to_db
+    "Technical Weight", 0, 10, key="w_tech", on_change=on_weight_change
 )
 
 w_rs_calc = 10 - w_fund - w_tech
@@ -817,7 +780,7 @@ if st.sidebar.button("⚙️ Relative Strength Rules", use_container_width=True)
     customize_rs_modal()
 
 # ----------------------------------------------------------------------------------
-# Dynamic Navigation Tabs (Admin Tab Unlocked Conditionally)
+# Dynamic Navigation Tabs
 # ----------------------------------------------------------------------------------
 tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
 if user_is_admin:
