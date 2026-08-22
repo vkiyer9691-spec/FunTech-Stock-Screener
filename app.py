@@ -2,8 +2,8 @@
 NSE Stock Screener — Interactive Analysis Engine (Auth Gated, Admin Enabled & Supabase Persisted)
 ----------------------------------------------------------------------------------
 Includes Enforced Main-Screen Supabase Authentication, Settings Persistence (Save/Load),
-Admin Email Privilege Checking, Mobile-First Responsive CSS, Multi-Broker Auto-Parser, 
-API Data-Drop Protection, Parallel Execution Engine, Chartink Integrator, and 1-Click TradingView Exporter.
+Admin Email Privilege Checking, Multi-Broker Auto-Parser, 
+Parallel Execution Engine, and 1-Click TradingView Exporter.
 
 Run with: streamlit run app.py
 """
@@ -31,7 +31,7 @@ except ImportError:
     SUPABASE_AVAILABLE = False
 
 # ----------------------------------------------------------------------------------
-# Page Config & Mobile-First CSS Scaffolding
+# Page Config & CSS Scaffolding
 # ----------------------------------------------------------------------------------
 st.set_page_config(
     page_title="NSE Stock Screener & Portfolio Evaluator", 
@@ -293,7 +293,6 @@ def render_login_screen():
             * **10-Point Technical System:** Multi-timeframe trend & momentum.
             * **Relative Strength Matrix:** Sector & Nifty 50 outperformance filters.
             * **Multi-Broker Portfolio Evaluator:** Auto-parse holdings.
-            * **Chartink Strategy Integrator:** Seamless custom scanner sync.
             * **1-Click TradingView Exporter:** Instant watchlist sync.
             """
         )
@@ -335,7 +334,7 @@ st.title("📊 NSE Stock Screener & Portfolio Evaluator")
 st.caption("Quantitative Multi-Pillar Engine for Stock Market Traders and Investors.")
 
 # ----------------------------------------------------------------------------------
-# Helper Functions & Data Fetchers (Defined early to prevent NameError exceptions)
+# Helper Functions & Data Fetchers
 # ----------------------------------------------------------------------------------
 def abbreviate_sector(sector_raw: str) -> str:
     if not sector_raw or sector_raw == "Unknown":
@@ -365,20 +364,6 @@ def parse_broker_symbols(df: pd.DataFrame) -> list:
             formatted_symbols.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
             
     return list(dict.fromkeys(formatted_symbols))
-
-
-def parse_chartink_input(text: str) -> list:
-    """Extracts ticker symbols from raw Chartink copy-pastes or custom text."""
-    if not text:
-        return []
-    tokens = re.findall(r'[A-Za-z0-9\-]+', text.upper())
-    formatted = []
-    skip_keywords = {"SYMBOL", "NAME", "SR", "NO", "PRICE", "CHANGE", "VOLUME", "PERC", "CHG", "NSE"}
-    for t in tokens:
-        clean = t.replace(".NS", "").strip()
-        if clean and clean not in skip_keywords and not clean.isdigit():
-            formatted.append(f"{clean}.NS")
-    return list(dict.fromkeys(formatted))
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -423,10 +408,6 @@ def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_info(ticker: str) -> dict:
-    """
-    Robust Financial Extractor replacing yfinance's deprecated dict properties.
-    Extracts directly from financials, quarterly_financials, and fast_info data structures.
-    """
     default_info = {
         "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
         "revenueGrowth": None, "fiftyTwoWeekHigh": None,
@@ -435,15 +416,12 @@ def fetch_info(ticker: str) -> dict:
     }
     try:
         t = yf.Ticker(ticker)
-        
-        # 1. Fast Info Fallback for High and Price
         try:
             default_info["fiftyTwoWeekHigh"] = t.fast_info.get("year_high")
             default_info["currentPrice"] = t.fast_info.get("last_price")
         except Exception:
             pass
 
-        # 2. Extract EPS & Revenue Growth directly from Financial DataFrames
         try:
             q_fin = t.quarterly_financials
             if q_fin is not None and not q_fin.empty:
@@ -464,7 +442,6 @@ def fetch_info(ticker: str) -> dict:
         except Exception:
             pass
 
-        # 3. Legacy Dict Info Lookup Fallback
         try:
             raw_info = t.info
             if isinstance(raw_info, dict):
@@ -479,7 +456,7 @@ def fetch_info(ticker: str) -> dict:
     return default_info
 
 # ----------------------------------------------------------------------------------
-# Dialog Modals with Database Sync
+# Dialog Modals
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
 def customize_fundamental_modal():
@@ -538,11 +515,10 @@ def show_pillar_details_modal(row_data):
     st.subheader(f"Symbol: {ticker.replace('.NS', '')}")
     st.caption(f"Sector: {row_data['Sector']} | Overall Score: {row_data['Total Score']:.2f} / 10")
     
-    tab_f, tab_t, tab_rs, tab_chart = st.tabs([
+    tab_f, tab_t, tab_rs = st.tabs([
         "🏛️ Fundamental (CANSLIM)", 
         "📈 Technical Momentum", 
-        "⚡ Relative Strength",
-        "📉 Interactive Charts"
+        "⚡ Relative Strength"
     ])
     
     with tab_f:
@@ -572,30 +548,12 @@ def show_pillar_details_modal(row_data):
         c_rs1.metric("RS vs Benchmark (Nifty 50)", f"{raw_rs.get('RS1_diff', 0):+.2f}%", delta=f"{raw_rs.get('RS1_score', 0):.2f}/5 pts")
         c_rs2.metric("RS vs Sector Average", f"{raw_rs.get('RS2_diff', 0):+.2f}%", delta=f"{raw_rs.get('RS2_score', 0):.2f}/5 pts")
 
-    with tab_chart:
-        st.markdown(f"**Technical & Momentum Visualizer for {ticker}**")
-        df_daily = fetch_daily(ticker)
-        if df_daily is not None and not df_daily.empty:
-            chart_df = df_daily.tail(200).copy()
-            chart_df["SMA50"] = chart_df["Close"].rolling(50).mean()
-            chart_df["SMA200"] = chart_df["Close"].rolling(200).mean()
-            chart_df["RSI"] = ta.rsi(chart_df["Close"], length=14)
-
-            st.line_chart(chart_df[["Close", "SMA50", "SMA200"]], height=280)
-            st.caption("Price vs 50 DMA & 200 DMA")
-            st.line_chart(chart_df["RSI"], height=150)
-            st.caption("14-Period Daily RSI")
-        else:
-            st.info("Unable to fetch chart data.")
-
     st.divider()
     if st.button("❌ Close Breakdown", use_container_width=True, type="primary"):
         st.session_state["active_inspect_ticker"] = None
         st.rerun()
 
-# ----------------------------------------------------------------------------------
-# Safe Session-Based Modal Trigger
-# ----------------------------------------------------------------------------------
+# Modal Trigger Logic
 target_ticker = st.session_state.get("active_inspect_ticker")
 if target_ticker:
     found_row = None
@@ -829,7 +787,6 @@ def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFra
 
 
 def fetch_single_stock(tkr: str):
-    """Worker task for multi-threaded fetch operations."""
     daily = fetch_daily(tkr)
     info = fetch_info(tkr) if daily is not None else {}
     return tkr, daily, info
@@ -840,7 +797,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
     stock_data = {}
     sector_returns = {}
     
-    progress = st.progress(0, text="Fetching stock data (Multi-Threaded Engine)...")
+    progress = st.progress(0, text="Fetching stock data...")
     
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(fetch_single_stock, tkr): tkr for tkr in ticker_list}
@@ -938,16 +895,15 @@ if st.sidebar.button("⚙️ Relative Strength Rules", use_container_width=True)
 # ----------------------------------------------------------------------------------
 # Dynamic Navigation Tabs
 # ----------------------------------------------------------------------------------
-tab_list = ["🔍 Stock Screener", "⚡ Chartink Integrator", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
+tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
 if user_is_admin:
     tab_list.append("🛠️ Admin Panel")
 
 tabs = st.tabs(tab_list)
 tab_screener = tabs[0]
-tab_chartink = tabs[1]
-tab_portfolio = tabs[2]
-tab_guide = tabs[3]
-tab_admin = tabs[4] if user_is_admin else None
+tab_portfolio = tabs[1]
+tab_guide = tabs[2]
+tab_admin = tabs[3] if user_is_admin else None
 
 # ==================================================================================
 # TAB 1: STOCK SCREENER
@@ -969,7 +925,7 @@ with tab_screener:
         except Exception as e:
             st.sidebar.error(f"Error parsing universe file: {e}")
 
-    full_options = list(dict.fromkeys(DEFAULT_UNIVERSE + csv_tickers + st.session_state.get("chartink_tickers", [])))
+    full_options = list(dict.fromkeys(DEFAULT_UNIVERSE + csv_tickers))
     selected_universe = st.sidebar.multiselect("Active Tickers", options=full_options, default=(csv_tickers if csv_tickers else DEFAULT_UNIVERSE[:30]))
     custom_raw = st.sidebar.text_input("Add Custom Tickers", value="")
     custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
@@ -1021,7 +977,7 @@ with tab_screener:
 
             st.divider()
 
-            # Screening Table with Toolbar Control
+            # Screening Table
             st.subheader("📋 Screening Results Table")
             st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
 
@@ -1061,47 +1017,7 @@ with tab_screener:
             )
 
 # ==================================================================================
-# TAB 2: CHARTINK STRATEGY INTEGRATOR
-# ==================================================================================
-with tab_chartink:
-    st.subheader("⚡ Chartink Custom Scanner Sync Engine")
-    st.caption("Directly paste Chartink scanner text output, HTML table text, or symbol lists to evaluate setups against CANSLIM, Technical, and RS models.")
-
-    c_ci1, c_ci2 = st.columns([2, 1])
-    with c_ci1:
-        raw_chartink_text = st.text_area(
-            "Paste Raw Chartink Scanner Results / Stock Table:", 
-            placeholder="Paste text directly from Chartink scanner output table or symbol list e.g.\nTRENT, HAL, ZOMATO, BEL, TATAMOTORS...", 
-            height=180
-        )
-    with c_ci2:
-        st.markdown("#### **Integration Steps:**")
-        st.markdown("1. Run scanner on **Chartink.com**")
-        st.markdown("2. Select all stock symbols in table & Copy")
-        st.markdown("3. Paste into text box on the left")
-        st.markdown("4. Click **Parse & Load Chartink Setups** below")
-
-    if st.button("⚡ Parse & Synchronize Chartink Setups", use_container_width=True, type="primary"):
-        parsed_ci = parse_chartink_input(raw_chartink_text)
-        if parsed_ci:
-            st.session_state["chartink_tickers"] = parsed_ci
-            st.success(f"Successfully extracted **{len(parsed_ci)} stocks** from Chartink input.")
-        else:
-            st.warning("Could not identify valid stock symbols. Please check input text format.")
-
-    if "chartink_tickers" in st.session_state and st.session_state["chartink_tickers"]:
-        ci_tickers = st.session_state["chartink_tickers"]
-        st.write(f"**Current Active Chartink Import ({len(ci_tickers)}):** `" + ", ".join([s.replace(".NS", "") for s in ci_tickers]) + "`")
-
-        if st.button("🚀 Analyze Chartink Candidates with 3-Pillar Model", use_container_width=True):
-            with st.spinner("Executing evaluation engine..."):
-                ci_results, ci_skipped = execute_scan(ci_tickers, w_fund, w_tech, w_rs)
-                if not ci_results.empty:
-                    st.session_state["results_df"] = ci_results
-                    st.success("Chartink evaluation complete. Results loaded into Screener matrix above.")
-
-# ==================================================================================
-# TAB 3: PORTFOLIO EVALUATOR
+# TAB 2: PORTFOLIO EVALUATOR
 # ==================================================================================
 with tab_portfolio:
     st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
@@ -1222,61 +1138,91 @@ with tab_portfolio:
         )
 
 # ==================================================================================
-# TAB 4: USER GUIDE
+# TAB 3: USER GUIDE (RESTORED FULL USE-CASES)
 # ==================================================================================
 with tab_guide:
-    st.subheader("ℹ️ User Guide & Scoring Methodology")
+    st.subheader("ℹ️ Comprehensive User Guide & Specific Use-Cases")
     st.markdown(
         """
-        Welcome to the **Quantitative Multi-Pillar Engine**. This tool combines CANSLIM fundamental growth metrics, 
-        multi-timeframe technical momentum rules, and relative strength alpha calculations to score NSE equities.
+        Welcome to the **Quantitative Multi-Pillar Engine**. This guide provides practical step-by-step workflows
+        for market screening, portfolio health auditing, parameter customization, and trading execution.
         """
     )
     
-    st.markdown("---")
+    st.divider()
     
+    st.markdown("### 🎯 Practical Use-Cases & Workflows")
+    
+    st.markdown("#### **1. Stock Screener Use-Case (Finding High-Growth Momentum Candidates)**")
+    st.markdown(
+        """
+        * **Step A (Select Universe):** Choose tickers from the pre-loaded **Nifty 500** list or upload a custom CSV file containing stock symbols.
+        * **Step B (Execute Scan):** Click **Run Screener Scan**. The multi-threaded engine fetches quarterly fundamentals and technical indicators in real-time.
+        * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics, technical rules, or RS calculations passed or failed[cite: 1].
+        """
+    )
+
+    st.markdown("#### **2. Portfolio Evaluator Use-Case (Auditing Holdings Health)**")
+    st.markdown(
+        """
+        * **Step A (Import Holdings):** Export your portfolio CSV/Excel statement from Zerodha, Groww, Upstox, Dhan, or Kotak and upload it under **Option A**, or paste tickers under **Option B**.
+        * **Step B (Analyze Health):** Click **Evaluate Portfolio Health**. The system calculates an aggregate **Portfolio Health Score** (0-10) and flags lagging stocks scoring below 5.0.
+        * **Step C (Export Audit):** Download the complete evaluation report as a CSV for off-line record keeping.
+        """
+    )
+
+    st.markdown("#### **3. Pillar Settings & Weightage Adjustment Use-Case**")
+    st.markdown(
+        """
+        * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight** in the sidebar. The engine auto-calculates the remaining **Relative Strength Weight** so all three total 10.
+        * **Customize Rules:** Click **Fundamental Rules**, **Technical Rules**, or **Relative Strength Rules** in the sidebar to toggle specific criteria on/off.
+        * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins[cite: 1].
+        """
+    )
+
+    st.markdown("#### **4. TradingView 1-Click Watchlist Export Use-Case**")
+    st.markdown(
+        """
+        * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to $\ge 7.0$ for top candidates).
+        * **Step B (Copy Formatted Strings):** Click the copy icon in the formatted code snippet box (e.g., `NSE:TRENT,NSE:HAL,NSE:TATAMOTORS`).
+        * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously[cite: 1].
+        """
+    )
+
+    st.divider()
+
+    st.markdown("### 🏛️ Scoring Pillar Logic Breakdown")
     col_g1, col_g2 = st.columns(2)
     with col_g1:
-        st.markdown("### 🏛️ Pillar 1: Fundamental Score")
+        st.markdown("#### **Pillar 1: Fundamental Rules (CANSLIM-7)**")
         st.markdown(
             """
-            * **C - Current Earnings:** EPS growth > 15% YoY or QoQ.
-            * **A - Annual Revenue:** Revenue growth > 10%.
-            * **N - Near 52W High:** Price within 25% of 52-week high.
-            * **S - Supply/Demand:** Tight price base consolidation near moving averages.
+            * **C - Current EPS:** Quarterly EPS growth > 15% YoY.
+            * **A - Annual Revenue:** Quarterly revenue growth > 10% YoY.
+            * **N - Near 52W High:** Current price within 25% of 52-week high.
+            * **S - Base Tightness:** 10-day volatility $\le 6\%$ and price near 50 DMA.
             * **L - Leader RS:** Daily RSI > 55.
-            * **I - Institutional Sponsorship:** Institutional holdings > 30%.
+            * **I - Institutional Ownership:** Institutional holdings > 30%.
             * **M - Market Direction:** Benchmark Nifty 50 above its 200 DMA.
             """
         )
     with col_g2:
-        st.markdown("### 📈 Pillar 2: Technical Score")
+        st.markdown("#### **Pillar 2: Technical Momentum Rules**")
         st.markdown(
             """
-            * **Trend Alignment:** Close > 200 DMA and near 50 DMA.
-            * **Consolidation:** Low volatility base building.
-            * **Moving Averages:** 50 and 200 DMA sloping upward.
-            * **Momentum Oscillators:** RSI and MACD confirmation across Daily, Weekly, and Monthly timeframes.
+            * **Trend Alignment:** Price > 200 DMA and within 5% of 50 DMA.
+            * **Stage 2 Proximity:** Price $\le 1.25 \times 200\text{ DMA}$.
+            * **MA Slopes:** 50 DMA and 200 DMA sloping upward over 5 bars.
+            * **Multi-Timeframe Oscillators:** Daily, Weekly, and Monthly RSI > 50 and rising; MACD line rising across timeframes.
             """
         )
 
-    st.markdown("---")
-    st.markdown("### ⚡ Pillar 3: Relative Strength & Portfolio Evaluation")
-    st.markdown(
-        """
-        * **RS vs Benchmark:** Measures 63-day percentage outperformance against Nifty 50 (`^NSEI`).
-        * **RS vs Sector:** Compares stock returns against its specific industry sector average.
-        * **Portfolio Evaluator:** Automatically parses holdings from broker CSV/Excel exports or pasted symbols to compute overall portfolio health and pinpoint weak holdings.
-        * **Chartink Integrator:** Syncs Chartink scanner queries directly into the engine matrix.
-        """
-    )
-
 # ==================================================================================
-# TAB 5: ADMIN PANEL
+# TAB 4: ADMIN PANEL (FIXED REGISTRATION AUDIT LIST)
 # ==================================================================================
 if user_is_admin and tab_admin is not None:
     with tab_admin:
-        st.subheader("🛠️ Administrator Control & User Management Dashboard")
+        st.subheader("🛠️ Administrator Control & System Users Audit")
         st.success(f"Authenticated as Administrator: `{user_email}`")
         
         st.divider()
@@ -1284,63 +1230,52 @@ if user_is_admin and tab_admin is not None:
         col_adm1, col_adm2 = st.columns([1, 1])
         
         with col_adm1:
-            st.markdown("#### 📊 System Metrics & Diagnostics")
+            st.markdown("#### 📊 System Diagnostics")
             st.json({
-                "Admin User": user_email,
-                "Supabase Connection Active": SUPABASE_AVAILABLE and get_supabase_client() is not None,
-                "Default Nifty 500 Universe Tickers": len(DEFAULT_UNIVERSE),
-                "Active Pillar Weights": {
+                "Admin Email": user_email,
+                "Supabase Connection": SUPABASE_AVAILABLE and get_supabase_client() is not None,
+                "Nifty 500 Default Universe": len(DEFAULT_UNIVERSE),
+                "Active Weights": {
                     "Fundamental": w_fund,
                     "Technical": w_tech,
                     "Relative Strength": w_rs
                 }
             })
             
-            if st.button("🧹 Clear Global Streamlit Data Cache", use_container_width=True):
+            if st.button("🧹 Clear Global Application Cache", use_container_width=True):
                 st.cache_data.clear()
-                st.success("Global application cache cleared successfully.")
+                st.success("Global application cache cleared.")
 
         with col_adm2:
-            st.markdown("#### 👥 Registered Users & Access Audit")
+            st.markdown("#### 👥 System Registered Users Audit")
             supabase = get_supabase_client()
+            
             if supabase:
                 try:
-                    users_list = []
-                    try:
-                        auth_users_res = supabase.auth.admin.list_users()
-                        if auth_users_res:
-                            for u in auth_users_res:
-                                users_list.append({
-                                    "User ID": getattr(u, "id", str(u)),
-                                    "Email": getattr(u, "email", "N/A"),
-                                    "Created At": getattr(u, "created_at", "N/A"),
-                                    "Last Sign In": getattr(u, "last_sign_in_at", "N/A")
-                                })
-                    except Exception:
-                        pass
-                    
-                    if not users_list:
-                        res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
-                        if res.data:
-                            for row in res.data:
-                                users_list.append({
-                                    "User ID": row.get("user_id"),
-                                    "Email": "Registered User",
-                                    "Created At": "N/A",
-                                    "Last Sign In": row.get("updated_at")
-                                })
-
-                    if users_list:
-                        st.dataframe(pd.DataFrame(users_list), use_container_width=True, hide_index=True)
+                    # Fetch stored user records from database table directly to show all active registered accounts
+                    res = supabase.table("user_settings").select("*").execute()
+                    if res.data and len(res.data) > 0:
+                        user_audit = []
+                        for row in res.data:
+                            uid = row.get("user_id")
+                            user_audit.append({
+                                "User ID": uid,
+                                "Is Admin": "Yes" if uid in [e for e in ADMIN_EMAILS] or user_email in ADMIN_EMAILS else "Standard",
+                                "Last Settings Sync": row.get("updated_at", "N/A"),
+                                "Fund Weight": row.get("w_fund"),
+                                "Tech Weight": row.get("w_tech")
+                            })
+                        st.dataframe(pd.DataFrame(user_audit), use_container_width=True, hide_index=True)
+                        st.caption(f"Total Active Registered Records Identified: {len(user_audit)}")
                     else:
-                        st.info("No user records retrieved from authentication system.")
+                        st.info("No saved settings records found in `user_settings` table yet.")
                 except Exception as e:
-                    st.error(f"Error retrieving user audit records: {e}")
+                    st.error(f"Error reading user audit database records: {e}")
             else:
-                st.warning("Supabase connection unavailable in local or offline mode.")
+                st.warning("Supabase connection offline or not configured.")
 
         st.divider()
-        st.markdown("#### 🗄️ Raw Database Inspection (`user_settings` Table)")
+        st.markdown("#### 🗄️ Database Record Inspection (`user_settings`)")
         if supabase:
             try:
                 full_res = supabase.table("user_settings").select("*").execute()
