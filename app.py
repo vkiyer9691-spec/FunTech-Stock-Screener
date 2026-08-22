@@ -477,7 +477,7 @@ def show_pillar_details_modal(row_data):
         st.rerun()
 
 # ----------------------------------------------------------------------------------
-# Safe Session-Based Modal Trigger
+# Safe Session-Based Modal Trigger (Updated to prevent ghost popups)
 # ----------------------------------------------------------------------------------
 target_ticker = st.session_state.get("active_inspect_ticker")
 if target_ticker:
@@ -493,11 +493,13 @@ if target_ticker:
         if not match.empty:
             found_row = match.iloc[0].to_dict()
 
+    # Immediately consume/clear the trigger so it never ghosts on subsequent reruns
+    st.session_state["active_inspect_ticker"] = None
+
     if found_row:
         show_pillar_details_modal(found_row)
     else:
         st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
-        st.session_state["active_inspect_ticker"] = None
 
 # ----------------------------------------------------------------------------------
 # Calculation Engines
@@ -1088,7 +1090,7 @@ with tab_portfolio:
         )
 
 # ==================================================================================
-# TAB 3: USER GUIDE (REVERTED TO STANDARD GUIDE)
+# TAB 3: USER GUIDE
 # ==================================================================================
 with tab_guide:
     st.subheader("ℹ️ User Guide & Scoring Methodology")
@@ -1137,7 +1139,7 @@ with tab_guide:
     )
 
 # ==================================================================================
-# TAB 4: ADMIN PANEL (UPDATED TO FETCH ALL REGISTERED USERS)
+# TAB 4: ADMIN PANEL
 # ==================================================================================
 if user_is_admin and tab_admin is not None:
     with tab_admin:
@@ -1170,7 +1172,6 @@ if user_is_admin and tab_admin is not None:
             supabase = get_supabase_client()
             if supabase:
                 try:
-                    # Attempt to fetch all registered users via Supabase auth admin API or fall back to profile records
                     users_list = []
                     try:
                         auth_users_res = supabase.auth.admin.list_users()
@@ -1186,7 +1187,6 @@ if user_is_admin and tab_admin is not None:
                         pass
                     
                     if not users_list:
-                        # Fallback query combining user settings table if admin auth list isn't enabled
                         res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
                         if res.data:
                             for row in res.data:
