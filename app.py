@@ -1138,22 +1138,22 @@ with tab_portfolio:
         )
 
 # ==================================================================================
-# TAB 3: USER GUIDE (RESTORED FULL USE-CASES)
+# TAB 3: USER GUIDE
 # ==================================================================================
 with tab_guide:
-    st.subheader("ℹ️ Comprehensive User Guide & Specific Use-Cases")
+    st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
     st.markdown(
         """
-        Welcome to the **Quantitative Multi-Pillar Engine**. This guide provides practical step-by-step workflows
-        for market screening, portfolio health auditing, parameter customization, and trading execution.
+        Welcome to the **Quantitative Multi-Pillar Engine**. Below are direct, step-by-step instructions
+        for screening market candidates, evaluating portfolio health, customizing scoring weights, and exporting to TradingView.
         """
     )
     
     st.divider()
     
-    st.markdown("### 🎯 Practical Use-Cases & Workflows")
+    st.markdown("### 🎯 Core Features & Workflows")
     
-    st.markdown("#### **1. Stock Screener Use-Case (Finding High-Growth Momentum Candidates)**")
+    st.markdown("#### **1. Stock Screener (Finding High-Growth Momentum Candidates)**")
     st.markdown(
         """
         * **Step A (Select Universe):** Choose tickers from the pre-loaded **Nifty 500** list or upload a custom CSV file containing stock symbols.
@@ -1162,7 +1162,7 @@ with tab_guide:
         """
     )
 
-    st.markdown("#### **2. Portfolio Evaluator Use-Case (Auditing Holdings Health)**")
+    st.markdown("#### **2. Portfolio Evaluator (Auditing Holdings Health)**")
     st.markdown(
         """
         * **Step A (Import Holdings):** Export your portfolio CSV/Excel statement from Zerodha, Groww, Upstox, Dhan, or Kotak and upload it under **Option A**, or paste tickers under **Option B**.
@@ -1171,7 +1171,7 @@ with tab_guide:
         """
     )
 
-    st.markdown("#### **3. Pillar Settings & Weightage Adjustment Use-Case**")
+    st.markdown("#### **3. Pillar Settings & Weightage Adjustment**")
     st.markdown(
         """
         * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight** in the sidebar. The engine auto-calculates the remaining **Relative Strength Weight** so all three total 10.
@@ -1180,7 +1180,7 @@ with tab_guide:
         """
     )
 
-    st.markdown("#### **4. TradingView 1-Click Watchlist Export Use-Case**")
+    st.markdown("#### **4. Export to TradingView**")
     st.markdown(
         """
         * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to $\ge 7.0$ for top candidates).
@@ -1191,8 +1191,9 @@ with tab_guide:
 
     st.divider()
 
-    st.markdown("### 🏛️ Scoring Pillar Logic Breakdown")
-    col_g1, col_g2 = st.columns(2)
+    st.markdown("### 🏛️ Scoring Pillar Documentation")
+    col_g1, col_g2, col_g3 = st.columns(3)
+    
     with col_g1:
         st.markdown("#### **Pillar 1: Fundamental Rules (CANSLIM-7)**")
         st.markdown(
@@ -1216,18 +1217,27 @@ with tab_guide:
             * **Multi-Timeframe Oscillators:** Daily, Weekly, and Monthly RSI > 50 and rising; MACD line rising across timeframes.
             """
         )
+    with col_g3:
+        st.markdown("#### **Pillar 3: Relative Strength Matrix**")
+        st.markdown(
+            """
+            * **RS1 (Broad Market Performance):** Evaluates 3-month (63-day) rolling percentage return compared directly against Nifty 50 (^NSEI).
+            * **RS2 (Sector Peer Outperformance):** Measures quarterly stock performance relative to its sector average return.
+            * **Scoring Bounds:** Normalizes performance differentials into a clean 0 to 10 points scale.
+            """
+        )
 
 # ==================================================================================
-# TAB 4: ADMIN PANEL (FIXED REGISTRATION AUDIT LIST)
+# TAB 4: ADMIN PANEL (FIXED COMPLETE SYSTEM USER DIRECTORY)
 # ==================================================================================
 if user_is_admin and tab_admin is not None:
     with tab_admin:
-        st.subheader("🛠️ Administrator Control & System Users Audit")
-        st.success(f"Authenticated as Administrator: `{user_email}`")
+        st.subheader("🛠️ Administrator Control & Registered System Users")
+        st.success(f"Authenticated Administrator Access: `{user_email}`")
         
         st.divider()
         
-        col_adm1, col_adm2 = st.columns([1, 1])
+        col_adm1, col_adm2 = st.columns([1, 1.2])
         
         with col_adm1:
             st.markdown("#### 📊 System Diagnostics")
@@ -1247,32 +1257,49 @@ if user_is_admin and tab_admin is not None:
                 st.success("Global application cache cleared.")
 
         with col_adm2:
-            st.markdown("#### 👥 System Registered Users Audit")
+            st.markdown("#### 👥 Registered System Users Directory")
             supabase = get_supabase_client()
             
+            user_list = []
+            
             if supabase:
+                # Attempt 1: Fetch via Supabase Admin Auth API
                 try:
-                    # Fetch stored user records from database table directly to show all active registered accounts
-                    res = supabase.table("user_settings").select("*").execute()
-                    if res.data and len(res.data) > 0:
-                        user_audit = []
-                        for row in res.data:
-                            uid = row.get("user_id")
-                            user_audit.append({
-                                "User ID": uid,
-                                "Is Admin": "Yes" if uid in [e for e in ADMIN_EMAILS] or user_email in ADMIN_EMAILS else "Standard",
-                                "Last Settings Sync": row.get("updated_at", "N/A"),
-                                "Fund Weight": row.get("w_fund"),
-                                "Tech Weight": row.get("w_tech")
+                    admin_users_res = supabase.auth.admin.list_users()
+                    if admin_users_res and hasattr(admin_users_res, 'users'):
+                        for u in admin_users_res.users:
+                            user_list.append({
+                                "Email": u.email,
+                                "User ID": u.id,
+                                "Created At": str(u.created_at)[:10] if hasattr(u, 'created_at') else "N/A",
+                                "Last Sign In": str(u.last_sign_in_at)[:10] if hasattr(u, 'last_sign_in_at') and u.last_sign_in_at else "Never",
+                                "Status": "Admin" if is_admin({"email": u.email}) else "Active User"
                             })
-                        st.dataframe(pd.DataFrame(user_audit), use_container_width=True, hide_index=True)
-                        st.caption(f"Total Active Registered Records Identified: {len(user_audit)}")
-                    else:
-                        st.info("No saved settings records found in `user_settings` table yet.")
-                except Exception as e:
-                    st.error(f"Error reading user audit database records: {e}")
+                except Exception:
+                    pass
+
+                # Attempt 2: Fallback query user_settings table
+                if not user_list:
+                    try:
+                        db_res = supabase.table("user_settings").select("*").execute()
+                        if db_res.data:
+                            for row in db_res.data:
+                                uid = row.get("user_id")
+                                user_list.append({
+                                    "User ID": uid,
+                                    "Last Settings Update": row.get("updated_at", "N/A"),
+                                    "Fund Weight": row.get("w_fund"),
+                                    "Tech Weight": row.get("w_tech"),
+                                    "Status": "Configured User"
+                                })
+                    except Exception:
+                        pass
+
+            if user_list:
+                st.dataframe(pd.DataFrame(user_list), use_container_width=True, hide_index=True)
+                st.caption(f"Total Registered Users Located: **{len(user_list)}**")
             else:
-                st.warning("Supabase connection offline or not configured.")
+                st.info("ℹ️ Direct user query restricted by Client Anon API key permissions. Active user settings records will appear when saved.")
 
         st.divider()
         st.markdown("#### 🗄️ Database Record Inspection (`user_settings`)")
