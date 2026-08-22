@@ -473,24 +473,21 @@ def show_pillar_details_modal(row_data):
 
     st.divider()
     if st.button("❌ Close Breakdown", use_container_width=True, type="primary"):
-        if "inspect" in st.query_params:
-            del st.query_params["inspect"]
+        st.session_state["active_inspect_ticker"] = None
         st.rerun()
 
 # ----------------------------------------------------------------------------------
-# Centralized Query Parameter Modal Trigger (Fixes StreamlitDuplicateElementId Bug)
+# Safe Session-Based Modal Trigger
 # ----------------------------------------------------------------------------------
-target_ticker = st.query_params.get("inspect")
+target_ticker = st.session_state.get("active_inspect_ticker")
 if target_ticker:
     found_row = None
     
-    # Check screener results
     if "results_df" in st.session_state and not st.session_state["results_df"].empty:
         match = st.session_state["results_df"][st.session_state["results_df"]["Ticker"] == target_ticker]
         if not match.empty:
             found_row = match.iloc[0].to_dict()
 
-    # Check portfolio results if not found in screener
     if not found_row and "p_results_df" in st.session_state and not st.session_state["p_results_df"].empty:
         match = st.session_state["p_results_df"][st.session_state["p_results_df"]["Ticker"] == target_ticker]
         if not match.empty:
@@ -500,8 +497,7 @@ if target_ticker:
         show_pillar_details_modal(found_row)
     else:
         st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
-        if "inspect" in st.query_params:
-            del st.query_params["inspect"]
+        st.session_state["active_inspect_ticker"] = None
 
 # ----------------------------------------------------------------------------------
 # Calculation Engines
@@ -792,7 +788,6 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
         total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
 
         results.append({
-            "Inspect": f"/?inspect={tkr}",
             "Ticker": tkr,
             "Total Score": round(total_score, 2),
             "Fundamental Score": fund_score,
@@ -932,34 +927,41 @@ with tab_screener:
 
             st.divider()
 
-            # Screening Table with Clean Link Button Column (Option A)
+            # Screening Table with Safe Session State Selector
             st.subheader("📋 Screening Results Table")
-            st.info("💡 Click **🔍 View** next to any row to open its full 3-pillar breakdown.")
+            st.info("💡 Select a row or click **🔍 View Breakdown** below to inspect its details without logging out.")
 
             display_table = df[[
-                "Inspect", "Ticker", "Total Score", "Fundamental Score", 
+                "Ticker", "Total Score", "Fundamental Score", 
                 "Technical Score", "Relative Strength Score", 
                 "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
             ]].copy()
 
-            st.dataframe(
-                display_table,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Inspect": st.column_config.LinkColumn(
-                        "Inspect", 
-                        display_text="🔍 View", 
-                        pinned=True, 
-                        width="small"
-                    ),
-                    "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
-                    "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
-                    "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
-                    "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
-                    "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
-                }
-            )
+            col_select, col_table = st.columns([1, 3])
+            
+            with col_select:
+                selected_ticker = st.selectbox(
+                    "Select Stock to Inspect:", 
+                    options=df["Ticker"].tolist(),
+                    key="scr_select_tkr"
+                )
+                if st.button("🔍 View Breakdown", key="scr_view_btn", use_container_width=True, type="primary"):
+                    st.session_state["active_inspect_ticker"] = selected_ticker
+                    st.rerun()
+
+            with col_table:
+                st.dataframe(
+                    display_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
+                        "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
+                        "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
+                        "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
+                        "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
+                    }
+                )
 
 # ==================================================================================
 # TAB 2: PORTFOLIO EVALUATOR
@@ -1036,32 +1038,39 @@ with tab_portfolio:
 
         st.divider()
         st.subheader("📊 Portfolio Scoring Matrix")
-        st.info("💡 Click **🔍 View** next to any holding to open its full 3-pillar breakdown.")
+        st.info("💡 Select a holding or click **🔍 View Breakdown** below to inspect its details without logging out.")
 
         p_table = p_results[[
-            "Inspect", "Ticker", "Total Score", "Fundamental Score", 
+            "Ticker", "Total Score", "Fundamental Score", 
             "Technical Score", "Relative Strength Score", 
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]].copy()
 
-        st.dataframe(
-            p_table,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Inspect": st.column_config.LinkColumn(
-                    "Inspect", 
-                    display_text="🔍 View", 
-                    pinned=True, 
-                    width="small"
-                ),
-                "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
-                "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
-                "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
-                "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
-                "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
-            }
-        )
+        col_p_select, col_p_table = st.columns([1, 3])
+
+        with col_p_select:
+            p_selected_ticker = st.selectbox(
+                "Select Holding to Inspect:", 
+                options=p_results["Ticker"].tolist(),
+                key="port_select_tkr"
+            )
+            if st.button("🔍 View Breakdown", key="port_view_btn", use_container_width=True, type="primary"):
+                st.session_state["active_inspect_ticker"] = p_selected_ticker
+                st.rerun()
+
+        with col_p_table:
+            st.dataframe(
+                p_table,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
+                    "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
+                    "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
+                    "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
+                    "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
+                }
+            )
 
         st.divider()
         st.download_button(
@@ -1095,7 +1104,7 @@ with tab_guide:
         * **Universe Selection:** Select the pre-loaded **Nifty 500** universe from the sidebar, type individual custom ticker symbols, or upload a custom CSV file.
         * **Running Scans:** Click **Run Screener Scan** to pull live market history and fundamental metrics.
         * **1-Click TradingView Sync:** Use the min-score slider to filter high-performing stocks and copy formatted symbol lists (`NSE:TRENT,NSE:HAL`) directly into TradingView watchlists.
-        * **Interactive Symbol Inspection:** Click the **🔍 View** link in any row to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
+        * **Interactive Symbol Inspection:** Select any ticker and click **🔍 View Breakdown** to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
         """
     )
 
