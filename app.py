@@ -931,7 +931,7 @@ with tab_screener:
 
             # Screening Table with Horizontal Toolbar Control
             st.subheader("📋 Screening Results Table")
-            st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
+            st.info("💡 Choose a symbol from the dropdown below and click **Breakdown** to inspect its detailed pillar breakdown.")
 
             display_table = df[[
                 "Ticker", "Total Score", "Fundamental Score", 
@@ -1043,7 +1043,7 @@ with tab_portfolio:
 
         st.divider()
         st.subheader("📊 Portfolio Scoring Matrix")
-        st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
+        st.info("💡 Choose a holding from the dropdown below and click **Breakdown** to inspect its detailed pillar breakdown.")
 
         p_table = p_results[[
             "Ticker", "Total Score", "Fundamental Score", 
@@ -1093,50 +1093,72 @@ with tab_portfolio:
 # TAB 3: USER GUIDE
 # ==================================================================================
 with tab_guide:
-    st.subheader("ℹ️ User Guide & Scoring Methodology")
+    st.subheader("ℹ️ User Guide, Use Cases & Scoring Methodology")
     st.markdown(
         """
-        Welcome to the **Quantitative Multi-Pillar Engine**. This tool combines CANSLIM fundamental growth metrics, 
-        multi-timeframe technical momentum rules, and relative strength alpha calculations to score NSE equities.
+        Welcome to the **Quantitative Multi-Pillar Engine**. This guide covers both the practical use-case workflows 
+        and the underlying scoring architecture designed to evaluate NSE equities.
         """
     )
     
     st.markdown("---")
+    st.markdown("### 🛠️ Core Feature Use Cases & Workflows")
     
-    col_g1, col_g2 = st.columns(2)
-    with col_g1:
-        st.markdown("### 🏛️ Pillar 1: Fundamental Score")
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
         st.markdown(
             """
-            * **C - Current Earnings:** EPS growth > 15% YoY or QoQ.
-            * **A - Annual Revenue:** Revenue growth > 10%.
-            * **N - Near 52W High:** Price within 25% of 52-week high.
-            * **S - Supply/Demand:** Tight price base consolidation near moving averages.
-            * **L - Leader RS:** Daily RSI > 55.
-            * **I - Institutional Sponsorship:** Institutional holdings > 30%.
-            * **M - Market Direction:** Benchmark Nifty 50 above its 200 DMA.
+            * **1. Periodic Screening Workflow (`🔍 Stock Screener`):**
+              * **Purpose:** Run scans across the Nifty 500 universe or custom lists to discover high-conviction breakout candidates without manual chart flipping.
+              * **Data Format Requirements:** When uploading custom lists or broker files, the tool expects standard headers (`tradingsymbol`, `symbol`, `ticker`, or `instrument`) containing NSE stock codes.
+              * **TradingView Integration:** Instantly filter stocks by minimum score thresholds and copy symbols via the **TradingView 1-Click Clipboard Exporter** for fast visual chart analysis.
             """
         )
-    with col_g2:
-        st.markdown("### 📈 Pillar 2: Technical Score")
+    with col_u2:
         st.markdown(
             """
-            * **Trend Alignment:** Close > 200 DMA and near 50 DMA.
-            * **Consolidation:** Low volatility base building.
-            * **Moving Averages:** 50 and 200 DMA sloping upward.
-            * **Momentum Oscillators:** RSI and MACD confirmation across Daily, Weekly, and Monthly timeframes.
+            * **2. Portfolio Health Audit Workflow (`💼 Portfolio Evaluator`):**
+              * **Purpose:** Audit current equity holdings to isolate strong performers from deteriorating positions.
+              * **Data Format Requirements:** Seamlessly accepts raw broker portfolio exports (Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, Kotak) or direct text pasting.
+              * **Actionable Output:** Sorts holdings by overall score, highlighting strong components ($\ge 7.0$) versus vulnerable holdings ($< 5.0$).
             """
         )
 
     st.markdown("---")
-    st.markdown("### ⚡ Pillar 3: Relative Strength & Portfolio Evaluation")
     st.markdown(
         """
-        * **RS vs Benchmark:** Measures 63-day percentage outperformance against Nifty 50 (`^NSEI`).
-        * **RS vs Sector:** Compares stock returns against its specific industry sector average.
-        * **Portfolio Evaluator:** Automatically parses holdings from broker CSV/Excel exports or pasted symbols to compute overall portfolio health and pinpoint weak holdings.
+        * **3. Deep-Dive Pillar Inspection (`📊 Pillar Score Breakdown`):**
+          * Select any symbol from scan results or portfolio tables to open a granular breakdown modal. Inspect individual fundamental rules, multi-timeframe technical momentum triggers, and relative strength metrics against sector peers.
+        * **4. Personalized Parameter Customization (`⚙️ Engine Controls`):**
+          * Tailor fundamental and technical parameters or adjust pillar weights to match your strategy. Changes are automatically saved to Supabase for all future sessions.
         """
     )
+
+    st.markdown("---")
+    st.markdown("### 🏛️ Underlying Scoring Methodology")
+    
+    col_g1, col_g2 = st.columns(2)
+    with col_g1:
+        st.markdown("#### Pillar 1: Fundamental Score (CANSLIM)")
+        st.markdown(
+            """
+            * **C:** EPS growth > 15% YoY/QoQ.
+            * **A:** Revenue growth > 10%.
+            * **N:** Price within 25% of 52-week high.
+            * **S:** Tight price base consolidation near moving averages.
+            * **L:** Leader Relative Strength (Daily RSI > 55).
+            * **I:** Institutional holdings > 30%.
+            * **M:** Benchmark Nifty 50 above its 200 DMA.
+            """
+        )
+    with col_g2:
+        st.markdown("#### Pillar 2 & 3: Technical & Relative Strength")
+        st.markdown(
+            """
+            * **Technical Momentum:** Validates trend alignment (Close > 200 DMA, near 50 DMA), low-volatility bases, sloping moving averages, and RSI/MACD confirmations across Daily, Weekly, and Monthly charts.
+            * **Relative Strength:** Evaluates 63-day percentage outperformance against Nifty 50 (`^NSEI`) and industry sector averages.
+            """
+        )
 
 # ==================================================================================
 # TAB 4: ADMIN PANEL
@@ -1173,34 +1195,22 @@ if user_is_admin and tab_admin is not None:
             if supabase:
                 try:
                     users_list = []
-                    try:
-                        auth_users_res = supabase.auth.admin.list_users()
-                        if auth_users_res:
-                            for u in auth_users_res:
-                                users_list.append({
-                                    "User ID": getattr(u, "id", str(u)),
-                                    "Email": getattr(u, "email", "N/A"),
-                                    "Created At": getattr(u, "created_at", "N/A"),
-                                    "Last Sign In": getattr(u, "last_sign_in_at", "N/A")
-                                })
-                    except Exception:
-                        pass
-                    
-                    if not users_list:
-                        res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
-                        if res.data:
-                            for row in res.data:
-                                users_list.append({
-                                    "User ID": row.get("user_id"),
-                                    "Email": "Registered User",
-                                    "Created At": "N/A",
-                                    "Last Sign In": row.get("updated_at")
-                                })
+                    # Query user settings records to reliably populate registered users
+                    res = supabase.table("user_settings").select("user_id, updated_at, w_fund, w_tech").execute()
+                    if res.data:
+                        for row in res.data:
+                            users_list.append({
+                                "User ID": row.get("user_id"),
+                                "Profile Status": "Active Configured",
+                                "Fundamental Weight": row.get("w_fund"),
+                                "Technical Weight": row.get("w_tech"),
+                                "Last Updated": row.get("updated_at")
+                            })
 
                     if users_list:
                         st.dataframe(pd.DataFrame(users_list), use_container_width=True, hide_index=True)
                     else:
-                        st.info("No user records retrieved from authentication system.")
+                        st.info("No user configuration records found in database.")
                 except Exception as e:
                     st.error(f"Error retrieving user audit records: {e}")
             else:
