@@ -452,7 +452,7 @@ def show_pillar_details_modal(row_data):
             status = "✅ Pass" if raw_fund.get(k, False) else "❌ Fail"
             active = "Active" if st.session_state.get(f"fund_{k}", True) else "Disabled"
             fund_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
-        st.table(pd.DataFrame(fund_items))
+        st.dataframe(pd.DataFrame(fund_items), use_container_width=True, hide_index=True)
 
     with tab_t:
         st.markdown(f"**Technical Score:** `{row_data['Technical Score']:.2f} / 10` (Passed: {row_data['Tech Passed']})")
@@ -462,7 +462,7 @@ def show_pillar_details_modal(row_data):
             status = "✅ Pass" if raw_tech.get(k, False) else "❌ Fail"
             active = "Active" if st.session_state.get(f"tech_{k}", True) else "Disabled"
             tech_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
-        st.table(pd.DataFrame(tech_items))
+        st.dataframe(pd.DataFrame(tech_items), use_container_width=True, hide_index=True)
 
     with tab_rs:
         st.markdown(f"**Relative Strength Score:** `{row_data['Relative Strength Score']:.2f} / 10`")
@@ -470,6 +470,38 @@ def show_pillar_details_modal(row_data):
         c_rs1, c_rs2 = st.columns(2)
         c_rs1.metric("RS vs Benchmark (Nifty 50)", f"{raw_rs.get('RS1_diff', 0):+.2f}%", delta=f"{raw_rs.get('RS1_score', 0):.2f}/5 pts")
         c_rs2.metric("RS vs Sector Average", f"{raw_rs.get('RS2_diff', 0):+.2f}%", delta=f"{raw_rs.get('RS2_score', 0):.2f}/5 pts")
+
+    st.divider()
+    if st.button("❌ Close Breakdown", use_container_width=True, type="primary"):
+        if "inspect" in st.query_params:
+            del st.query_params["inspect"]
+        st.rerun()
+
+# ----------------------------------------------------------------------------------
+# Centralized Query Parameter Modal Trigger (Fixes StreamlitDuplicateElementId Bug)
+# ----------------------------------------------------------------------------------
+target_ticker = st.query_params.get("inspect")
+if target_ticker:
+    found_row = None
+    
+    # Check screener results
+    if "results_df" in st.session_state and not st.session_state["results_df"].empty:
+        match = st.session_state["results_df"][st.session_state["results_df"]["Ticker"] == target_ticker]
+        if not match.empty:
+            found_row = match.iloc[0].to_dict()
+
+    # Check portfolio results if not found in screener
+    if not found_row and "p_results_df" in st.session_state and not st.session_state["p_results_df"].empty:
+        match = st.session_state["p_results_df"][st.session_state["p_results_df"]["Ticker"] == target_ticker]
+        if not match.empty:
+            found_row = match.iloc[0].to_dict()
+
+    if found_row:
+        show_pillar_details_modal(found_row)
+    else:
+        st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
+        if "inspect" in st.query_params:
+            del st.query_params["inspect"]
 
 # ----------------------------------------------------------------------------------
 # Calculation Engines
@@ -760,7 +792,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
         total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
 
         results.append({
-            "Inspect": "🔍",
+            "Inspect": f"/?inspect={tkr}",
             "Ticker": tkr,
             "Total Score": round(total_score, 2),
             "Fundamental Score": fund_score,
@@ -900,9 +932,9 @@ with tab_screener:
 
             st.divider()
 
-            # Screening Table with Row Selection
+            # Screening Table with Clean Link Button Column (Option A)
             st.subheader("📋 Screening Results Table")
-            st.info("💡 **Select any row** in the table below to inspect its full 3-pillar breakdown in a modal window.")
+            st.info("💡 Click **🔍 View** next to any row to open its full 3-pillar breakdown.")
 
             display_table = df[[
                 "Inspect", "Ticker", "Total Score", "Fundamental Score", 
@@ -910,14 +942,17 @@ with tab_screener:
                 "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
             ]].copy()
 
-            event = st.dataframe(
+            st.dataframe(
                 display_table,
                 use_container_width=True,
                 hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
                 column_config={
-                    "Inspect": st.column_config.TextColumn("🔍", pinned=True, width="small"),
+                    "Inspect": st.column_config.LinkColumn(
+                        "Inspect", 
+                        display_text="🔍 View", 
+                        pinned=True, 
+                        width="small"
+                    ),
                     "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
                     "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
                     "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
@@ -925,14 +960,6 @@ with tab_screener:
                     "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
                 }
             )
-
-            # Trigger Modal on Row Selection
-            if event and hasattr(event, "selection") and event.selection:
-                selected_rows = event.selection.get("rows", [])
-                if selected_rows:
-                    selected_idx = selected_rows[0]
-                    selected_row_data = df.iloc[selected_idx].to_dict()
-                    show_pillar_details_modal(selected_row_data)
 
 # ==================================================================================
 # TAB 2: PORTFOLIO EVALUATOR
@@ -1009,7 +1036,7 @@ with tab_portfolio:
 
         st.divider()
         st.subheader("📊 Portfolio Scoring Matrix")
-        st.info("💡 **Select any row** in the table below to inspect its full 3-pillar breakdown in a modal window.")
+        st.info("💡 Click **🔍 View** next to any holding to open its full 3-pillar breakdown.")
 
         p_table = p_results[[
             "Inspect", "Ticker", "Total Score", "Fundamental Score", 
@@ -1017,15 +1044,17 @@ with tab_portfolio:
             "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
         ]].copy()
 
-        p_event = st.dataframe(
+        st.dataframe(
             p_table,
             use_container_width=True,
             hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key="port_table_event",
             column_config={
-                "Inspect": st.column_config.TextColumn("🔍", pinned=True, width="small"),
+                "Inspect": st.column_config.LinkColumn(
+                    "Inspect", 
+                    display_text="🔍 View", 
+                    pinned=True, 
+                    width="small"
+                ),
                 "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="small"),
                 "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
                 "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
@@ -1033,14 +1062,6 @@ with tab_portfolio:
                 "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
             }
         )
-
-        # Trigger Modal on Row Selection in Portfolio
-        if p_event and hasattr(p_event, "selection") and p_event.selection:
-            p_selected_rows = p_event.selection.get("rows", [])
-            if p_selected_rows:
-                p_selected_idx = p_selected_rows[0]
-                p_selected_row_data = p_results.iloc[p_selected_idx].to_dict()
-                show_pillar_details_modal(p_selected_row_data)
 
         st.divider()
         st.download_button(
@@ -1074,7 +1095,7 @@ with tab_guide:
         * **Universe Selection:** Select the pre-loaded **Nifty 500** universe from the sidebar, type individual custom ticker symbols, or upload a custom CSV file.
         * **Running Scans:** Click **Run Screener Scan** to pull live market history and fundamental metrics.
         * **1-Click TradingView Sync:** Use the min-score slider to filter high-performing stocks and copy formatted symbol lists (`NSE:TRENT,NSE:HAL`) directly into TradingView watchlists.
-        * **Interactive Symbol Inspection:** Select any row in the results table (marked with 🔍 on the left) to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
+        * **Interactive Symbol Inspection:** Click the **🔍 View** link in any row to open a popup dialog showing the exact pass/fail status for every rule across all 3 pillars.
         """
     )
 
