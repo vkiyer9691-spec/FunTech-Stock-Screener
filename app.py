@@ -192,23 +192,10 @@ def get_supabase_client():
 
     if url and key and url != "None" and key != "None":
         try:
-            # Force apikey header into client options to ensure auth requests aren't dropped by gateway
-            from supabase.lib.client_options import ClientOptions
-            options = ClientOptions(
-                headers={
-                    "apikey": key,
-                    "Authorization": f"Bearer {key}"
-                }
-            )
-            return create_client(url, key, options=options)
+            return create_client(url, key)
         except Exception:
-            try:
-                # Fallback standard initialization
-                return create_client(url, key)
-            except Exception:
-                return None
+            return None
     return None
-
 
 def load_user_settings_from_db(user_id: str):
     supabase = get_supabase_client()
