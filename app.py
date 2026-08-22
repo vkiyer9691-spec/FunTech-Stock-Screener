@@ -214,9 +214,14 @@ def load_user_settings_from_db(user_id: str):
 def save_user_settings_to_db():
     supabase = get_supabase_client()
     user = st.session_state.get("user")
+    session = st.session_state.get("supabase_session")
     
     if not supabase or not user:
         return
+
+    # Attach the active user session token to satisfy Postgrest RLS checks
+    if session and hasattr(session, "access_token"):
+        supabase.postgrest.auth(session.access_token)
 
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     if not user_id:
