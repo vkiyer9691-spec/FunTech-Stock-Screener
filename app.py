@@ -1,8 +1,8 @@
 """
 NSE Stock Screener — Interactive Analysis Engine
-------------------------------------------------
+------------------------------------------------------------------
 Includes Multi-Broker Auto-Parser, API Data-Drop Protection,
-Top-Positioned 1-Click TradingView Exporter, and Complete User Guide.
+Top-Positioned 1-Click TradingView Exporter, Browser Persistence, and Complete User Guide.
 
 Run with: streamlit run app.py
 """
@@ -13,9 +13,11 @@ import numpy as np
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
+import json
 import time
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 import pandas_ta as ta
 
@@ -32,11 +34,23 @@ st.markdown(
         padding-top: 0.15rem;
         padding-bottom: 0.15rem;
         font-weight: 600;
+        width: 100% !important;
     }
-    div[data-testid="column"] {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+    .stock-card {
+        background-color: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+    .card-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #4CAF50;
+    }
+    .card-metric {
+        font-size: 0.85rem;
+        color: #CCCCCC;
     }
     </style>
     """,
@@ -44,7 +58,7 @@ st.markdown(
 )
 
 st.title("📊 NSE Stock Screener & Portfolio Evaluator")
-st.caption("Quantitative Multi-Pillar Engine for Swing Traders & Growth Investors.")
+st.caption("Quant Multi-Pillar Engine for Stock Market Investors and Traders")
 
 # ----------------------------------------------------------------------------------
 # Constants & Helpers
@@ -149,7 +163,10 @@ DEFAULT_RS_PARAMS = {
     "RS2": "RS2: Sector Peer Relative Strength",
 }
 
-# Session State Initialization
+# ----------------------------------------------------------------------------------
+# Browser LocalStorage Integration (Option B Persistence)
+# ----------------------------------------------------------------------------------
+# 1. Initialize session defaults
 for p_key in DEFAULT_FUND_PARAMS:
     if f"fund_{p_key}" not in st.session_state:
         st.session_state[f"fund_{p_key}"] = True
@@ -162,6 +179,53 @@ for p_key in DEFAULT_RS_PARAMS:
     if f"rs_{p_key}" not in st.session_state:
         st.session_state[f"rs_{p_key}"] = True
 
+if "w_fund" not in st.session_state:
+    st.session_state["w_fund"] = 4
+if "w_tech" not in st.session_state:
+    st.session_state["w_tech"] = 4
+
+# Read URL params loaded from browser storage on startup
+query_params = st.query_params
+if "app_cfg" in query_params:
+    try:
+        cfg = json.loads(query_params["app_cfg"])
+        if "w_fund" in cfg: st.session_state["w_fund"] = int(cfg["w_fund"])
+        if "w_tech" in cfg: st.session_state["w_tech"] = int(cfg["w_tech"])
+        for k in DEFAULT_FUND_PARAMS:
+            if f"fund_{k}" in cfg: st.session_state[f"fund_{k}"] = bool(cfg[f"fund_{k}"])
+        for k in DEFAULT_TECH_PARAMS:
+            if f"tech_{k}" in cfg: st.session_state[f"tech_{k}"] = bool(cfg[f"tech_{k}"])
+        for k in DEFAULT_RS_PARAMS:
+            if f"rs_{k}" in cfg: st.session_state[f"rs_{k}"] = bool(cfg[f"rs_{k}"])
+    except Exception:
+        pass
+
+def sync_settings_to_browser():
+    """Generates invisible JS component to persist settings in browser localStorage."""
+    save_dict = {
+        "w_fund": st.session_state.get("w_fund", 4),
+        "w_tech": st.session_state.get("w_tech", 4),
+    }
+    for k in DEFAULT_FUND_PARAMS: save_dict[f"fund_{k}"] = st.session_state.get(f"fund_{k}", True)
+    for k in DEFAULT_TECH_PARAMS: save_dict[f"tech_{k}"] = st.session_state.get(f"tech_{k}", True)
+    for k in DEFAULT_RS_PARAMS: save_dict[f"rs_{k}"] = st.session_state.get(f"rs_{k}", True)
+    
+    js_code = f"""
+    <script>
+    const settings = {json.dumps(save_dict)};
+    localStorage.setItem('screener_user_settings', JSON.stringify(settings));
+    
+    // Auto-sync back to URL query string if missing
+    const urlParams = new URLSearchParams(window.parent.location.search);
+    if (!urlParams.has('app_cfg')) {{
+        urlParams.set('app_cfg', JSON.stringify(settings));
+        window.parent.history.replaceState({{}}, '', '?' + urlParams.toString());
+    }}
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+sync_settings_to_browser()
 
 # ----------------------------------------------------------------------------------
 # Dialog Modals
@@ -173,11 +237,11 @@ def customize_fundamental_modal():
         st.session_state[f"fund_{k}"] = st.checkbox(label, value=st.session_state[f"fund_{k}"])
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_fund"):
+    if col1.button("Restore Defaults", key="reset_fund", use_container_width=True):
         for k in DEFAULT_FUND_PARAMS:
             st.session_state[f"fund_{k}"] = True
         st.rerun()
-    if col2.button("Apply & Close", key="apply_fund"):
+    if col2.button("Apply & Close", key="apply_fund", use_container_width=True):
         st.rerun()
 
 
@@ -188,11 +252,11 @@ def customize_technical_modal():
         st.session_state[f"tech_{k}"] = st.checkbox(label, value=st.session_state[f"tech_{k}"])
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_tech"):
+    if col1.button("Restore Defaults", key="reset_tech", use_container_width=True):
         for k in DEFAULT_TECH_PARAMS:
             st.session_state[f"tech_{k}"] = True
         st.rerun()
-    if col2.button("Apply & Close", key="apply_tech"):
+    if col2.button("Apply & Close", key="apply_tech", use_container_width=True):
         st.rerun()
 
 
@@ -203,13 +267,12 @@ def customize_rs_modal():
         st.session_state[f"rs_{k}"] = st.checkbox(label, value=st.session_state[f"rs_{k}"])
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_rs"):
+    if col1.button("Restore Defaults", key="reset_rs", use_container_width=True):
         for k in DEFAULT_RS_PARAMS:
             st.session_state[f"rs_{k}"] = True
         st.rerun()
-    if col2.button("Apply & Close", key="apply_rs"):
+    if col2.button("Apply & Close", key="apply_rs", use_container_width=True):
         st.rerun()
-
 
 # ----------------------------------------------------------------------------------
 # Data Fetching & Robust Calculation Engines
@@ -241,11 +304,13 @@ def fetch_info(ticker: str) -> dict:
         "revenueGrowth": None, "fiftyTwoWeekHigh": None,
         "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
         "sector": "Unknown",
+        "_data_valid": False
     }
     try:
         raw_info = yf.Ticker(ticker).info
-        if isinstance(raw_info, dict):
+        if isinstance(raw_info, dict) and len(raw_info) > 5:
             default_info.update(raw_info)
+            default_info["_data_valid"] = True
     except Exception:
         pass
     return default_info
@@ -474,12 +539,17 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
     bench_daily = fetch_daily(BENCHMARK)
     stock_data = {}
     sector_returns = {}
+    missing_fund_count = 0
     
     progress = st.progress(0, text="Evaluating universe...")
     for i, tkr in enumerate(ticker_list):
         progress.progress((i + 1) / len(ticker_list), text=f"Processing {tkr}...")
         daily = fetch_daily(tkr)
         info = fetch_info(tkr)
+        
+        if not info.get("_data_valid", False):
+            missing_fund_count += 1
+
         if daily is not None:
             stock_data[tkr] = {"daily": daily, "info": info}
             if len(daily) >= 63:
@@ -525,8 +595,8 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
             "raw_rs": raw_rs,
         })
 
-    return pd.DataFrame(results), skipped
-
+    data_drop_flag = (missing_fund_count / len(ticker_list)) > 0.3 if ticker_list else False
+    return pd.DataFrame(results), skipped, data_drop_flag
 
 # ----------------------------------------------------------------------------------
 # Sidebar Controls
@@ -534,8 +604,8 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
 st.sidebar.header("⚙️ Engine Controls")
 
 st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
-w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, 4, key="w_fund")
-w_tech = st.sidebar.slider("Technical Weight", 0, 10, 4, key="w_tech")
+w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, st.session_state["w_fund"], key="w_fund")
+w_tech = st.sidebar.slider("Technical Weight", 0, 10, st.session_state["w_tech"], key="w_tech")
 w_rs_calc = 10 - w_fund - w_tech
 
 if w_rs_calc < 0:
@@ -596,13 +666,23 @@ with tab_screener:
         else:
             st.cache_data.clear()
             with st.spinner("Running quantitative scan..."):
-                results_df, skipped = execute_scan(universe, w_fund, w_tech, w_rs)
+                results_df, skipped, data_drop_flag = execute_scan(universe, w_fund, w_tech, w_rs)
                 st.session_state["results_df"] = results_df
                 st.session_state["skipped_tickers"] = skipped
+                st.session_state["data_drop_flag"] = data_drop_flag
 
     if "results_df" in st.session_state:
         df = st.session_state["results_df"]
         skipped = st.session_state.get("skipped_tickers", [])
+        data_drop_flag = st.session_state.get("data_drop_flag", False)
+
+        # DATA STREAM DROP WARNING BANNER
+        if data_drop_flag:
+            st.warning(
+                "⚠️ **Data Feed Warning:** Yahoo Finance API is currently experiencing data drops or rate-limiting on fundamental metrics for several NSE symbols. "
+                "Fundamental scores may be artificially low due to missing data ('Fail/No Data'). Technical and Relative Strength scores remain accurate. "
+                "Consider re-running the scan in a few minutes."
+            )
 
         if not df.empty:
             df = df.sort_values("Total Score", ascending=False).reset_index(drop=True)
@@ -614,7 +694,7 @@ with tab_screener:
 
             st.divider()
 
-            # --- TRADINGVIEW 1-CLICK CLIPBOARD EXPORT (TOP POSITION) ---
+            # --- TRADINGVIEW 1-CLICK CLIPBOARD EXPORT ---
             st.subheader("📈 TradingView 1-Click Clipboard Exporter")
             col_tv1, col_tv2 = st.columns([1, 2])
             
@@ -634,21 +714,33 @@ with tab_screener:
 
             st.divider()
 
-            # --- SCREENER RESULTS TABLE ---
-            st.subheader("📋 Screening Results Table")
-            st.info("💡 **Click symbol name** to view its score breakdown modal.")
-
-            col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
-            cols = st.columns(col_ratios)
-            headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
-            for c, h in zip(cols, headers):
-                c.markdown(f"**{h}**")
-            st.divider()
+            # --- SCREENER RESULTS CARDS ---
+            st.subheader("📋 Screening Results")
+            st.info("💡 **Click inspect button** to view detailed CANSLIM & Technical rule breakdown.")
 
             for idx, row in df.iterrows():
-                r_cols = st.columns(col_ratios)
-                with r_cols[0]:
-                    with st.popover(row['Ticker'], use_container_width=True):
+                with st.container():
+                    st.markdown(
+                        f"""
+                        <div class="stock-card">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span class="card-title">{row['Ticker']}</span>
+                                <span style="font-size:1.2rem; font-weight:700;">Score: {row['Total Score']:.2f} / 10</span>
+                            </div>
+                            <div class="card-metric" style="margin-top:6px;">
+                                <b>Fund:</b> {row['Fundamental Score']:.2f} | 
+                                <b>Tech:</b> {row['Technical Score']:.2f} ({row['Tech Passed']}) | 
+                                <b>RS:</b> {row['Relative Strength Score']:.2f} ({row['RS Details']})
+                            </div>
+                            <div class="card-metric" style="margin-top:4px;">
+                                <b>Sector:</b> {row['Sector']} | <b>CANSLIM:</b> {row['CANSLIM Hits']}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    
+                    with st.popover(f"🔍 Inspect Breakdown ({row['Ticker']})", use_container_width=True):
                         st.subheader(f"Breakdown: {row['Ticker']}")
                         
                         st.markdown("##### **1. CANSLIM-7 Parameters**")
@@ -662,15 +754,6 @@ with tab_screener:
                         for k, label in DEFAULT_TECH_PARAMS.items():
                             t_tbl.append({"Param": k, "Rule": label, "Status": "✅ PASS" if row['raw_tech'].get(k) else "❌ FAIL"})
                         st.dataframe(pd.DataFrame(t_tbl), hide_index=True, use_container_width=True)
-
-                r_cols[1].write(f"**{row['Total Score']:.2f}**")
-                r_cols[2].write(f"{row['Fundamental Score']:.2f}")
-                r_cols[3].write(f"{row['Technical Score']:.2f}")
-                r_cols[4].write(f"{row['Relative Strength Score']:.2f}")
-                r_cols[5].write(row['Tech Passed'])
-                r_cols[6].write(row['CANSLIM Hits'])
-                r_cols[7].write(row['RS Details'])
-                r_cols[8].write(row['Sector'])
 
 # ==================================================================================
 # TAB 2: PORTFOLIO EVALUATOR
@@ -728,8 +811,11 @@ with tab_portfolio:
         
         if st.button("🚀 Evaluate Portfolio Health", use_container_width=True):
             with st.spinner("Evaluating portfolio holdings against 3-Pillar engine..."):
-                p_results, p_skipped = execute_scan(parsed_portfolio_tickers, w_fund, w_tech, w_rs)
+                p_results, p_skipped, p_data_drop = execute_scan(parsed_portfolio_tickers, w_fund, w_tech, w_rs)
                 
+                if p_data_drop:
+                    st.warning("⚠️ **Data Feed Warning:** Some holdings were missing fundamental data points due to temporary Yahoo Finance API throttling.")
+
                 if not p_results.empty:
                     p_results = p_results.sort_values("Total Score", ascending=False).reset_index(drop=True)
                     
@@ -745,31 +831,34 @@ with tab_portfolio:
                     st.divider()
                     st.subheader("📊 Portfolio Scoring Matrix")
 
-                    col_ratios = [1.8, 0.7, 0.6, 0.6, 0.6, 0.8, 1.2, 2.1, 1.3]
-                    cols = st.columns(col_ratios)
-                    headers = ["Symbol", "Total", "Fund", "Tech", "RS", "Tech Hit", "CANSLIM Hit", "RS Info", "Sector"]
-                    for c, h in zip(cols, headers):
-                        c.markdown(f"**{h}**")
-                    st.divider()
-
                     for idx, row in p_results.iterrows():
-                        r_cols = st.columns(col_ratios)
-                        r_cols[0].write(f"**{row['Ticker']}**")
-                        r_cols[1].write(f"**{row['Total Score']:.2f}**")
-                        r_cols[2].write(f"{row['Fundamental Score']:.2f}")
-                        r_cols[3].write(f"{row['Technical Score']:.2f}")
-                        r_cols[4].write(f"{row['Relative Strength Score']:.2f}")
-                        r_cols[5].write(row['Tech Passed'])
-                        r_cols[6].write(row['CANSLIM Hits'])
-                        r_cols[7].write(row['RS Details'])
-                        r_cols[8].write(row['Sector'])
+                        st.markdown(
+                            f"""
+                            <div class="stock-card">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="card-title">{row['Ticker']}</span>
+                                    <span style="font-size:1.2rem; font-weight:700;">Score: {row['Total Score']:.2f} / 10</span>
+                                </div>
+                                <div class="card-metric" style="margin-top:6px;">
+                                    <b>Fund:</b> {row['Fundamental Score']:.2f} | 
+                                    <b>Tech:</b> {row['Technical Score']:.2f} ({row['Tech Passed']}) | 
+                                    <b>RS:</b> {row['Relative Strength Score']:.2f} ({row['RS Details']})
+                                </div>
+                                <div class="card-metric" style="margin-top:4px;">
+                                    <b>Sector:</b> {row['Sector']} | <b>CANSLIM:</b> {row['CANSLIM Hits']}
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
                     st.divider()
                     st.download_button(
                         label="⬇️ Export Portfolio Evaluation CSV",
                         data=p_results.to_csv(index=False).encode("utf-8"),
                         file_name="portfolio_evaluation_results.csv",
-                        mime="text/csv"
+                        mime="text/csv",
+                        use_container_width=True
                     )
 
 # ==================================================================================
@@ -840,7 +929,7 @@ with tab_guide:
         3. Choose your universe (Default Nifty 500, upload a custom CSV, or type specific tickers).
         4. Click **🔍 Run Screener Scan**.
         5. Filter results using the **Min Score Filter** slider.
-        6. Click the popover on any stock ticker to inspect its pass/fail breakdown per rule.
+        6. Click the inspect button on any stock card to view its pass/fail breakdown per rule.
         """
     )
 
