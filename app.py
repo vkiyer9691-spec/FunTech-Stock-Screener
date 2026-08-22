@@ -335,7 +335,7 @@ st.title("📊 NSE Stock Screener & Portfolio Evaluator")
 st.caption("Quantitative Multi-Pillar Engine for Stock Market Traders and Investors.")
 
 # ----------------------------------------------------------------------------------
-# Helper Functions & Data Fetchers
+# Helper Functions & Data Fetchers (Defined early to prevent NameError exceptions)
 # ----------------------------------------------------------------------------------
 def abbreviate_sector(sector_raw: str) -> str:
     if not sector_raw or sector_raw == "Unknown":
@@ -399,6 +399,84 @@ def load_default_nifty500():
     ]
 
 DEFAULT_UNIVERSE = load_default_nifty500()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
+    for attempt in range(retries):
+        try:
+            df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
+            if df is None or df.empty or len(df) < 30:
+                time.sleep(0.3)
+                continue
+            required_cols = ["Open", "High", "Low", "Close", "Volume"]
+            if not all(col in df.columns for col in required_cols):
+                continue
+            df.index = pd.to_datetime(df.index)
+            df = df[required_cols].copy().replace([np.inf, -np.inf], np.nan).dropna()
+            if len(df) >= 30:
+                return df
+        except Exception:
+            time.sleep(0.3)
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_info(ticker: str) -> dict:
+    """
+    Robust Financial Extractor replacing yfinance's deprecated dict properties.
+    Extracts directly from financials, quarterly_financials, and fast_info data structures.
+    """
+    default_info = {
+        "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
+        "revenueGrowth": None, "fiftyTwoWeekHigh": None,
+        "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
+        "sector": "Unknown",
+    }
+    try:
+        t = yf.Ticker(ticker)
+        
+        # 1. Fast Info Fallback for High and Price
+        try:
+            default_info["fiftyTwoWeekHigh"] = t.fast_info.get("year_high")
+            default_info["currentPrice"] = t.fast_info.get("last_price")
+        except Exception:
+            pass
+
+        # 2. Extract EPS & Revenue Growth directly from Financial DataFrames
+        try:
+            q_fin = t.quarterly_financials
+            if q_fin is not None and not q_fin.empty:
+                rev_row = next((r for r in q_fin.index if "total revenue" in str(r).lower() or "revenue" in str(r).lower()), None)
+                ni_row = next((r for r in q_fin.index if "net income" in str(r).lower()), None)
+
+                if rev_row and len(q_fin.columns) >= 5:
+                    cur_rev = q_fin.loc[rev_row].iloc[0]
+                    yoy_rev = q_fin.loc[rev_row].iloc[4]
+                    if yoy_rev and yoy_rev > 0:
+                        default_info["revenueGrowth"] = (cur_rev - yoy_rev) / yoy_rev
+
+                if ni_row and len(q_fin.columns) >= 5:
+                    cur_ni = q_fin.loc[ni_row].iloc[0]
+                    yoy_ni = q_fin.loc[ni_row].iloc[4]
+                    if yoy_ni and yoy_ni > 0:
+                        default_info["earningsQuarterlyGrowth"] = (cur_ni - yoy_ni) / yoy_ni
+        except Exception:
+            pass
+
+        # 3. Legacy Dict Info Lookup Fallback
+        try:
+            raw_info = t.info
+            if isinstance(raw_info, dict):
+                for k, v in raw_info.items():
+                    if default_info.get(k) is None and v is not None:
+                        default_info[k] = v
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+    return default_info
 
 # ----------------------------------------------------------------------------------
 # Dialog Modals with Database Sync
@@ -542,85 +620,6 @@ if target_ticker:
 # ----------------------------------------------------------------------------------
 # Calculation Engines
 # ----------------------------------------------------------------------------------
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
-    for attempt in range(retries):
-        try:
-            df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
-            if df is None or df.empty or len(df) < 30:
-                time.sleep(0.3)
-                continue
-            required_cols = ["Open", "High", "Low", "Close", "Volume"]
-            if not all(col in df.columns for col in required_cols):
-                continue
-            df.index = pd.to_datetime(df.index)
-            df = df[required_cols].copy().replace([np.inf, -np.inf], np.nan).dropna()
-            if len(df) >= 30:
-                return df
-        except Exception:
-            time.sleep(0.3)
-    return None
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_info(ticker: str) -> dict:
-    """
-    Robust Financial Extractor replacing yfinance's deprecated dict properties.
-    Extracts directly from financials, quarterly_financials, and fast_info data structures.
-    """
-    default_info = {
-        "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
-        "revenueGrowth": None, "fiftyTwoWeekHigh": None,
-        "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
-        "sector": "Unknown",
-    }
-    try:
-        t = yf.Ticker(ticker)
-        
-        # 1. Fast Info Fallback for High and Price
-        try:
-            default_info["fiftyTwoWeekHigh"] = t.fast_info.get("year_high")
-            default_info["currentPrice"] = t.fast_info.get("last_price")
-        except Exception:
-            pass
-
-        # 2. Extract EPS & Revenue Growth directly from Financial DataFrames
-        try:
-            q_fin = t.quarterly_financials
-            if q_fin is not None and not q_fin.empty:
-                # Find Revenue / Net Income rows
-                rev_row = next((r for r in q_fin.index if "total revenue" in str(r).lower() or "revenue" in str(r).lower()), None)
-                ni_row = next((r for r in q_fin.index if "net income" in str(r).lower()), None)
-
-                if rev_row and len(q_fin.columns) >= 5:
-                    cur_rev = q_fin.loc[rev_row].iloc[0]
-                    yoy_rev = q_fin.loc[rev_row].iloc[4]
-                    if yoy_rev and yoy_rev > 0:
-                        default_info["revenueGrowth"] = (cur_rev - yoy_rev) / yoy_rev
-
-                if ni_row and len(q_fin.columns) >= 5:
-                    cur_ni = q_fin.loc[ni_row].iloc[0]
-                    yoy_ni = q_fin.loc[ni_row].iloc[4]
-                    if yoy_ni and yoy_ni > 0:
-                        default_info["earningsQuarterlyGrowth"] = (cur_ni - yoy_ni) / yoy_ni
-        except Exception:
-            pass
-
-        # 3. Legacy Dict Info Lookup Fallback
-        try:
-            raw_info = t.info
-            if isinstance(raw_info, dict):
-                for k, v in raw_info.items():
-                    if default_info.get(k) is None and v is not None:
-                        default_info[k] = v
-        except Exception:
-            pass
-
-    except Exception:
-        pass
-    return default_info
-
-
 def resample_ohlc(daily: pd.DataFrame, rule: str) -> pd.DataFrame:
     if daily is None or daily.empty:
         return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
@@ -843,7 +842,6 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
     
     progress = st.progress(0, text="Fetching stock data (Multi-Threaded Engine)...")
     
-    # Accelerated ThreadPool Execution
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(fetch_single_stock, tkr): tkr for tkr in ticker_list}
         completed = 0
