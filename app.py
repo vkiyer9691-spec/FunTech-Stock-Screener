@@ -164,9 +164,8 @@ DEFAULT_RS_PARAMS = {
 }
 
 # ----------------------------------------------------------------------------------
-# Browser LocalStorage Integration (Option B Persistence)
+# Browser LocalStorage Integration & State Initialization
 # ----------------------------------------------------------------------------------
-# 1. Initialize session defaults
 for p_key in DEFAULT_FUND_PARAMS:
     if f"fund_{p_key}" not in st.session_state:
         st.session_state[f"fund_{p_key}"] = True
@@ -184,7 +183,6 @@ if "w_fund" not in st.session_state:
 if "w_tech" not in st.session_state:
     st.session_state["w_tech"] = 4
 
-# Read URL params loaded from browser storage on startup
 query_params = st.query_params
 if "app_cfg" in query_params:
     try:
@@ -201,7 +199,6 @@ if "app_cfg" in query_params:
         pass
 
 def sync_settings_to_browser():
-    """Generates invisible JS component to persist settings in browser localStorage."""
     save_dict = {
         "w_fund": st.session_state.get("w_fund", 4),
         "w_tech": st.session_state.get("w_tech", 4),
@@ -215,7 +212,6 @@ def sync_settings_to_browser():
     const settings = {json.dumps(save_dict)};
     localStorage.setItem('screener_user_settings', JSON.stringify(settings));
     
-    // Auto-sync back to URL query string if missing
     const urlParams = new URLSearchParams(window.parent.location.search);
     if (!urlParams.has('app_cfg')) {{
         urlParams.set('app_cfg', JSON.stringify(settings));
@@ -228,13 +224,14 @@ def sync_settings_to_browser():
 sync_settings_to_browser()
 
 # ----------------------------------------------------------------------------------
-# Dialog Modals
+# Dialog Modals (Fixed State Persistence)
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
 def customize_fundamental_modal():
     st.write("Select which CANSLIM-7 criteria to include in the Fundamental Score calculation:")
+    new_fund_vals = {}
     for k, label in DEFAULT_FUND_PARAMS.items():
-        st.session_state[f"fund_{k}"] = st.checkbox(label, value=st.session_state[f"fund_{k}"])
+        new_fund_vals[k] = st.checkbox(label, value=st.session_state.get(f"fund_{k}", True), key=f"chk_fund_{k}")
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_fund", use_container_width=True):
@@ -242,14 +239,17 @@ def customize_fundamental_modal():
             st.session_state[f"fund_{k}"] = True
         st.rerun()
     if col2.button("Apply & Close", key="apply_fund", use_container_width=True):
+        for k, v in new_fund_vals.items():
+            st.session_state[f"fund_{k}"] = v
         st.rerun()
 
 
 @st.dialog("⚙️ Customize Technical Parameters")
 def customize_technical_modal():
     st.write("Select which rules to include in the 10-Point Technical Score calculation:")
+    new_tech_vals = {}
     for k, label in DEFAULT_TECH_PARAMS.items():
-        st.session_state[f"tech_{k}"] = st.checkbox(label, value=st.session_state[f"tech_{k}"])
+        new_tech_vals[k] = st.checkbox(label, value=st.session_state.get(f"tech_{k}", True), key=f"chk_tech_{k}")
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_tech", use_container_width=True):
@@ -257,14 +257,17 @@ def customize_technical_modal():
             st.session_state[f"tech_{k}"] = True
         st.rerun()
     if col2.button("Apply & Close", key="apply_tech", use_container_width=True):
+        for k, v in new_tech_vals.items():
+            st.session_state[f"tech_{k}"] = v
         st.rerun()
 
 
 @st.dialog("⚙️ Customize Relative Strength Parameters")
 def customize_rs_modal():
     st.write("Select which relative strength benchmarks to include:")
+    new_rs_vals = {}
     for k, label in DEFAULT_RS_PARAMS.items():
-        st.session_state[f"rs_{k}"] = st.checkbox(label, value=st.session_state[f"rs_{k}"])
+        new_rs_vals[k] = st.checkbox(label, value=st.session_state.get(f"rs_{k}", True), key=f"chk_rs_{k}")
     
     col1, col2 = st.columns([1, 1])
     if col1.button("Restore Defaults", key="reset_rs", use_container_width=True):
@@ -272,10 +275,12 @@ def customize_rs_modal():
             st.session_state[f"rs_{k}"] = True
         st.rerun()
     if col2.button("Apply & Close", key="apply_rs", use_container_width=True):
+        for k, v in new_rs_vals.items():
+            st.session_state[f"rs_{k}"] = v
         st.rerun()
 
 # ----------------------------------------------------------------------------------
-# Data Fetching & Robust Calculation Engines
+# Data Fetching & Calculation Engines
 # ----------------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
@@ -346,7 +351,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
     raw_results = {}
     valid_metrics = {}
 
-    # --- 1. EPS Growth ('C') ---
     eps_growth = info.get("earningsGrowth")
     if eps_growth is None:
         eps_growth = info.get("earningsQuarterlyGrowth")
@@ -358,7 +362,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["C"] = False
         valid_metrics["C"] = False
 
-    # --- 2. Revenue Growth ('A') ---
     rev_growth = info.get("revenueGrowth")
     if rev_growth is not None and pd.notna(rev_growth):
         raw_results["A"] = bool(rev_growth > 0.10)
@@ -367,7 +370,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["A"] = False
         valid_metrics["A"] = False
 
-    # --- 3. 52-Week High Proximity ('N') ---
     fifty2_high = info.get("fiftyTwoWeekHigh")
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
 
@@ -381,7 +383,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["N"] = False
         valid_metrics["N"] = True
 
-    # --- 4. Supply/Demand ('S') ---
     if daily is not None and len(daily) >= 50:
         close = daily["Close"]
         sma50 = close.rolling(50).mean().iloc[-1]
@@ -392,7 +393,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["S"] = False
     valid_metrics["S"] = True
 
-    # --- 5. Relative Strength Leader ('L') ---
     if daily is not None and len(daily) >= 14:
         rsi = ta.rsi(daily["Close"], length=14)
         raw_results["L"] = bool(rsi is not None and not rsi.empty and rsi.iloc[-1] > 55)
@@ -400,7 +400,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["L"] = False
     valid_metrics["L"] = True
 
-    # --- 6. Institutional Holdings ('I') ---
     inst_hold = info.get("heldPercentInstitutions")
     if inst_hold is not None and pd.notna(inst_hold):
         raw_results["I"] = bool(inst_hold > 0.30)
@@ -409,7 +408,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["I"] = False
         valid_metrics["I"] = False
 
-    # --- 7. Market Direction ('M') ---
     if bench_daily is not None and len(bench_daily) >= 200:
         bench_close = bench_daily["Close"]
         bench_sma200 = bench_close.rolling(200).mean().iloc[-1]
@@ -418,7 +416,6 @@ def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.D
         raw_results["M"] = False
     valid_metrics["M"] = True
 
-    # --- Normalized Pro-Rata Scoring ---
     active_passed = 0
     active_total = 0
     passed_labels = []
@@ -599,13 +596,14 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs):
     return pd.DataFrame(results), skipped, data_drop_flag
 
 # ----------------------------------------------------------------------------------
-# Sidebar Controls
+# Sidebar Controls (Fixed Slider Keying)
 # ----------------------------------------------------------------------------------
 st.sidebar.header("⚙️ Engine Controls")
 
 st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
-w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, st.session_state["w_fund"], key="w_fund")
-w_tech = st.sidebar.slider("Technical Weight", 0, 10, st.session_state["w_tech"], key="w_tech")
+
+w_fund = st.sidebar.slider("Fundamental Weight", 0, 10, key="w_fund")
+w_tech = st.sidebar.slider("Technical Weight", 0, 10, key="w_tech")
 w_rs_calc = 10 - w_fund - w_tech
 
 if w_rs_calc < 0:
@@ -676,7 +674,6 @@ with tab_screener:
         skipped = st.session_state.get("skipped_tickers", [])
         data_drop_flag = st.session_state.get("data_drop_flag", False)
 
-        # DATA STREAM DROP WARNING BANNER
         if data_drop_flag:
             st.warning(
                 "⚠️ **Data Feed Warning:** Yahoo Finance API is currently experiencing data drops or rate-limiting on fundamental metrics for several NSE symbols. "
@@ -694,7 +691,6 @@ with tab_screener:
 
             st.divider()
 
-            # --- TRADINGVIEW 1-CLICK CLIPBOARD EXPORT ---
             st.subheader("📈 TradingView 1-Click Clipboard Exporter")
             col_tv1, col_tv2 = st.columns([1, 2])
             
@@ -714,7 +710,6 @@ with tab_screener:
 
             st.divider()
 
-            # --- SCREENER RESULTS CARDS ---
             st.subheader("📋 Screening Results")
             st.info("💡 **Click inspect button** to view detailed CANSLIM & Technical rule breakdown.")
 
