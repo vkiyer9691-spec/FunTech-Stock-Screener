@@ -18,7 +18,9 @@ if not hasattr(np, "NaN"):
 
 import pandas as pd
 import streamlit as st
-st.write("DEBUG - Secrets keys found:", list(st.secrets.keys()))
+st.write("DEBUG - SUPABASE_URL:", repr(st.secrets.get("SUPABASE_URL")))
+st.write("DEBUG - SUPABASE_KEY type:", type(st.secrets.get("SUPABASE_KEY")))
+st.write("DEBUG - SUPABASE_KEY length:", len(str(st.secrets.get("SUPABASE_KEY")) or ""))
 import yfinance as yf
 import pandas_ta as ta
 
