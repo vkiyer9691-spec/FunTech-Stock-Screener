@@ -250,6 +250,8 @@ def save_user_settings_to_db():
 def init_auth_session():
     if "user" not in st.session_state:
         st.session_state["user"] = None
+    if "supabase_session" not in st.session_state:
+        st.session_state["supabase_session"] = None
 
 
 def render_login_screen():
@@ -266,6 +268,7 @@ def render_login_screen():
         
         if st.button("Bypass Login (Developer / Local Mode)", use_container_width=True):
             st.session_state["user"] = {"id": "local-dev-id", "email": "vkiyer@hotmail.com"}
+            st.session_state["supabase_session"] = None
             st.rerun()
         return False
 
@@ -282,6 +285,8 @@ def render_login_screen():
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state["user"] = res.user
+                    st.session_state["supabase_session"] = res.session
+                    
                     user_id = getattr(res.user, "id", None)
                     if user_id:
                         load_user_settings_from_db(user_id)
@@ -293,6 +298,9 @@ def render_login_screen():
             if st.button("Create Account", use_container_width=True, type="primary"):
                 try:
                     res = supabase.auth.sign_up({"email": email, "password": password})
+                    if res.user and res.session:
+                        st.session_state["user"] = res.user
+                        st.session_state["supabase_session"] = res.session
                     st.success("Account created! Check your email or log in.")
                 except Exception as e:
                     st.error(f"Sign up failed: {e}")
@@ -355,6 +363,7 @@ if st.sidebar.button("🚪 Log Out", use_container_width=True):
         except Exception:
             pass
     st.session_state["user"] = None
+    st.session_state["supabase_session"] = None
     st.rerun()
 
 st.sidebar.divider()
