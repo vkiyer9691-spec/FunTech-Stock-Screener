@@ -18,6 +18,7 @@ if not hasattr(np, "NaN"):
 
 import pandas as pd
 import streamlit as st
+st.write("DEBUG - Secrets keys found:", list(st.secrets.keys()))
 import yfinance as yf
 import pandas_ta as ta
 
