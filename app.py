@@ -18,9 +18,6 @@ if not hasattr(np, "NaN"):
 
 import pandas as pd
 import streamlit as st
-st.write("DEBUG - SUPABASE_URL:", repr(st.secrets.get("SUPABASE_URL")))
-st.write("DEBUG - SUPABASE_KEY type:", type(st.secrets.get("SUPABASE_KEY")))
-st.write("DEBUG - SUPABASE_KEY length:", len(str(st.secrets.get("SUPABASE_KEY")) or ""))
 import yfinance as yf
 import pandas_ta as ta
 
@@ -175,22 +172,14 @@ def get_supabase_client():
     if not SUPABASE_AVAILABLE:
         return None
     
-    url, key = None, None
-    try:
-        if "SUPABASE_URL" in st.secrets:
-            url = st.secrets["SUPABASE_URL"]
-        if "SUPABASE_KEY" in st.secrets:
-            key = st.secrets["SUPABASE_KEY"]
-    except Exception:
-        pass
+    url = str(st.secrets.get("SUPABASE_URL") or st.secrets.get("supabase", {}).get("url") or os.environ.get("SUPABASE_URL") or "").strip()
+    key = str(st.secrets.get("SUPABASE_KEY") or st.secrets.get("supabase", {}).get("key") or os.environ.get("SUPABASE_KEY") or "").strip()
 
-    if not url:
-        url = os.environ.get("SUPABASE_URL")
-    if not key:
-        key = os.environ.get("SUPABASE_KEY")
-
-    if url and key:
-        return create_client(url, key)
+    if url and key and url != "None" and key != "None":
+        try:
+            return create_client(url, key)
+        except Exception:
+            return None
     return None
 
 
