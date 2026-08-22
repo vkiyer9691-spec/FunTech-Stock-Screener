@@ -2,7 +2,7 @@
 NSE Stock Screener — Interactive Analysis Engine (Auth Gated, Admin Enabled & Supabase Persisted)
 ----------------------------------------------------------------------------------
 Includes Enforced Main-Screen Supabase Authentication, Settings Persistence (Save/Load),
-Admin Email Privilege Checking, Multi-Broker Auto-Parser, 
+Dynamic Database-Driven Admin Privilege Checking, Multi-Broker Auto-Parser, 
 Parallel Execution Engine, and 1-Click TradingView Exporter.
 
 Run with: streamlit run app.py
@@ -73,9 +73,8 @@ st.markdown(
 )
 
 # ----------------------------------------------------------------------------------
-# Constants, Defaults & Admin Access Control
+# Constants & Defaults
 # ----------------------------------------------------------------------------------
-ADMIN_EMAILS = ["vkiyer@hotmail.com"]
 BENCHMARK = "^NSEI"
 
 DEFAULT_FUND_PARAMS = {
@@ -119,12 +118,6 @@ BROKER_SYMBOL_HEADERS = [
     "ticker", "company name", "stock name", "stock", "scrip name", "display name"
 ]
 
-def is_admin(user) -> bool:
-    if not user:
-        return False
-    email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
-    return email.lower() in [e.lower() for e in ADMIN_EMAILS]
-
 # ----------------------------------------------------------------------------------
 # Safe Supabase Helper & Persistence Engine
 # ----------------------------------------------------------------------------------
@@ -139,6 +132,34 @@ def get_supabase_client():
         except Exception:
             return None
     return None
+
+
+def is_admin(user) -> bool:
+    """Dynamic Role Check via Supabase Profiles Table"""
+    if not user:
+        return False
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not user_id:
+        return False
+    
+    supabase = get_supabase_client()
+    if not supabase:
+        # Fallback for local development mode
+        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+        return email.lower() == "vkiyer@hotmail.com"
+
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+
+        res = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("role") == "admin"
+    except Exception:
+        pass
+
+    return False
 
 
 def init_session_defaults():
@@ -1158,7 +1179,7 @@ with tab_guide:
         """
         * **Step A (Select Universe):** Choose tickers from the pre-loaded **Nifty 500** list or upload a custom CSV file containing stock symbols.
         * **Step B (Execute Scan):** Click **Run Screener Scan**. The multi-threaded engine fetches quarterly fundamentals and technical indicators in real-time.
-        * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics, technical rules, or RS calculations passed or failed[cite: 1].
+        * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics, technical rules, or RS calculations passed or failed.
         """
     )
 
@@ -1176,7 +1197,7 @@ with tab_guide:
         """
         * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight** in the sidebar. The engine auto-calculates the remaining **Relative Strength Weight** so all three total 10.
         * **Customize Rules:** Click **Fundamental Rules**, **Technical Rules**, or **Relative Strength Rules** in the sidebar to toggle specific criteria on/off.
-        * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins[cite: 1].
+        * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
         """
     )
 
@@ -1185,7 +1206,7 @@ with tab_guide:
         """
         * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to $\ge 7.0$ for top candidates).
         * **Step B (Copy Formatted Strings):** Click the copy icon in the formatted code snippet box (e.g., `NSE:TRENT,NSE:HAL,NSE:TATAMOTORS`).
-        * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously[cite: 1].
+        * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously.
         """
     )
 
@@ -1228,7 +1249,7 @@ with tab_guide:
         )
 
 # ==================================================================================
-# TAB 4: ADMIN PANEL (OPTION A PROFILES PATTERN)
+# TAB 4: ADMIN PANEL (DYNAMIC ROLE-BASED)
 # ==================================================================================
 if user_is_admin and tab_admin is not None:
     with tab_admin:
@@ -1243,6 +1264,7 @@ if user_is_admin and tab_admin is not None:
             st.markdown("#### 📊 System Diagnostics")
             st.json({
                 "Admin Email": user_email,
+                "Admin Status": "Verified via profiles.role",
                 "Supabase Connection": SUPABASE_AVAILABLE and get_supabase_client() is not None,
                 "Nifty 500 Default Universe": len(DEFAULT_UNIVERSE),
                 "Active Weights": {
@@ -1263,7 +1285,7 @@ if user_is_admin and tab_admin is not None:
             
             if supabase:
                 try:
-                    # Retrieve all registered accounts directly from the public.profiles table
+                    # Retrieve all registered accounts directly from public.profiles table
                     session = st.session_state.get("supabase_session")
                     if session and hasattr(session, "access_token"):
                         supabase.postgrest.auth(session.access_token)
@@ -1274,9 +1296,9 @@ if user_is_admin and tab_admin is not None:
                         for u in profiles_res.data:
                             user_list.append({
                                 "Email": u.get("email", "N/A"),
+                                "Role": u.get("role", "user").capitalize(),
                                 "User ID": u.get("id"),
-                                "Created At": str(u.get("created_at", ""))[:10],
-                                "Role": "Admin" if is_admin({"email": u.get("email", "")}) else "User"
+                                "Created At": str(u.get("created_at", ""))[:10]
                             })
                 except Exception as e:
                     st.error(f"Error reading profiles table: {e}")
