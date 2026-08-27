@@ -62,6 +62,7 @@ Required for inbox delivery:
 - `SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` (service role, Actions only)
 - Run `supabase_digest.sql` in the Supabase SQL editor, then opt in on **Streamlit Cloud** (not only a local Windows copy)
 - Optional: `DIGEST_TO` if you want a copy even when opt-in lookup fails
+- Replies are steered away from your Gmail via `Reply-To: noreply@funtech.invalid` (override with secret `SMTP_REPLY_TO`, or set it to `off` to keep replies on `SMTP_FROM`)
 
 A green check with `"deliveries": []` means SMTP worked but **nobody was on the recipient list**. The job now fails in that case unless it can send a fallback copy to `SMTP_FROM`.
 

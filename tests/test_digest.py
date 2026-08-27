@@ -12,6 +12,8 @@ from digest import (
     is_weekday_ist,
     rank_universes,
     render_html,
+    smtp_from_parts,
+    smtp_reply_to_header,
     subscriber_from_settings_row,
 )
 
@@ -62,6 +64,7 @@ class DigestTests(unittest.TestCase):
         self.assertIn("not a stock recommendation", html.lower())
         self.assertIn("consult your financial advisor", html.lower())
         self.assertIn("user-selected settings and weightages", html.lower())
+        self.assertIn("Replies are not delivered to the sender", html)
 
     def test_subscriber_from_supabase_row(self):
         row = {
@@ -86,6 +89,15 @@ class DigestTests(unittest.TestCase):
                 extra_recipients_from_env(["alpha@example.com", "alpha@example.com"]),
                 ["alpha@example.com", "beta@example.com"],
             )
+
+    def test_reply_to_defaults_off_gmail(self):
+        with patch.dict(os.environ, {"SMTP_FROM": "Fun Tech Screener <Vkiyer@gmail.com>", "SMTP_REPLY_TO": ""}, clear=False):
+            header, envelope = smtp_from_parts()
+            self.assertEqual(envelope.lower(), "vkiyer@gmail.com")
+            self.assertIn("FunTech Screener", header)
+            self.assertIn("noreply@funtech.invalid", smtp_reply_to_header())
+        with patch.dict(os.environ, {"SMTP_REPLY_TO": "off"}, clear=False):
+            self.assertEqual(smtp_reply_to_header(), "")
 
 
 if __name__ == "__main__":

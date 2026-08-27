@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr, parseaddr
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -26,6 +27,9 @@ OUTBOX_DIR = ROOT / "digest_outbox"
 QUICK_UNIVERSES = ["Nifty 50", "Nifty Next 50"]
 DEFAULT_TOP_N = 10
 DEFAULT_WEIGHTS = (4, 4, 2)
+DEFAULT_FROM_NAME = "FunTech Screener"
+# Reserved .invalid TLD — replies bounce instead of landing in SMTP_FROM.
+DEFAULT_REPLY_TO_ADDR = "noreply@funtech.invalid"
 
 
 def _mail_cfg(name: str) -> str:
@@ -135,10 +139,41 @@ def _log(msg: str) -> None:
 
 
 def extract_email_address(raw: str) -> str:
+    _name, addr = parseaddr((raw or "").strip())
+    if addr and "@" in addr:
+        return addr
     text = (raw or "").strip()
     if "<" in text and ">" in text:
         text = text.split("<", 1)[1].split(">", 1)[0].strip()
     return text if "@" in text else ""
+
+
+def smtp_from_parts() -> tuple[str, str]:
+    """Display From header and envelope mailbox for SMTP."""
+    raw = _mail_cfg("SMTP_FROM")
+    _ignored_name, addr = parseaddr(raw)
+    addr = addr or extract_email_address(raw)
+    name = (_mail_cfg("SMTP_FROM_NAME") or DEFAULT_FROM_NAME).strip()
+    if not addr:
+        return raw, ""
+    return formataddr((name, addr)), addr
+
+
+def smtp_reply_to_header() -> str:
+    """Reply-To so clients do not default to the Gmail From address.
+
+    Set SMTP_REPLY_TO to off/none/- to leave replies on SMTP_FROM.
+    """
+    raw = _mail_cfg("SMTP_REPLY_TO")
+    if raw.lower() in {"off", "none", "-", "from"}:
+        return ""
+    if not raw:
+        return formataddr((DEFAULT_FROM_NAME, DEFAULT_REPLY_TO_ADDR))
+    name, addr = parseaddr(raw)
+    addr = addr or extract_email_address(raw)
+    if not addr:
+        return ""
+    return formataddr((name or DEFAULT_FROM_NAME, addr))
 
 
 def extra_recipients_from_env(explicit: list[str] | None = None) -> list[str]:
@@ -316,6 +351,7 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
   <p style="margin-top:36px;padding:16px;border:1px solid #ccc;background:#fafafa;font-size:13px;line-height:1.5">
     <strong>Disclaimer:</strong> {DISCLAIMER}
   </p>
+  <p style="color:#666;font-size:12px">This message is sent automatically. Replies are not delivered to the sender.</p>
   <p style="color:#666;font-size:12px">Markets open 9:15 AM IST. Educational use only.</p>
 </body></html>
 """
@@ -341,17 +377,21 @@ def send_email(to_addr: str, subject: str, html: str) -> str:
     port = int(_mail_cfg("SMTP_PORT") or "587")
     user = _mail_cfg("SMTP_USER")
     password = _mail_cfg("SMTP_PASSWORD")
-    from_addr = _mail_cfg("SMTP_FROM")
+    from_header, envelope_from = smtp_from_parts()
+    envelope_from = envelope_from or extract_email_address(_mail_cfg("SMTP_FROM"))
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = from_addr
+    msg["From"] = from_header
     msg["To"] = to_addr
+    reply_to = smtp_reply_to_header()
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.attach(MIMEText(html, "html", "utf-8"))
     with smtplib.SMTP(host, port, timeout=30) as smtp:
         smtp.starttls()
         if user:
             smtp.login(user, password)
-        smtp.sendmail(from_addr, [to_addr], msg.as_string())
+        smtp.sendmail(envelope_from, [to_addr], msg.as_string())
     return "sent"
 
 
