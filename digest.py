@@ -31,9 +31,6 @@ def _mail_cfg(name: str) -> str:
     env = str(os.environ.get(name) or "").strip()
     if env:
         return env
-    secrets_path = ROOT / ".streamlit" / "secrets.toml"
-    if not secrets_path.exists() or secrets_path.stat().st_size == 0:
-        return ""
     try:
         import streamlit as st
         return str(st.secrets.get(name) or "").strip()

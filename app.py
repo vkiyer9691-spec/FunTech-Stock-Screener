@@ -50,9 +50,6 @@ def _cfg(name: str, nested_section: str | None = None, nested_key: str | None = 
     env = str(os.environ.get(name) or "").strip()
     if env:
         return env
-    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
-    if not secrets_path.exists() or secrets_path.stat().st_size == 0:
-        return ""
     try:
         val = st.secrets.get(name)
         if val:
@@ -2212,5 +2209,5 @@ def _run_streamlit_ui():
         "For queries: vkiyer@hotmail.com."
     )
 
-if _in_streamlit() and __name__ == "__main__":
+if __name__ == "__main__":
     _run_streamlit_ui()
