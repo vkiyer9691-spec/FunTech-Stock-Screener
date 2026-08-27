@@ -1,0 +1,9 @@
+.streamlit/secrets.toml
+.venv/
+__pycache__/
+*.pyc
+.Python
+.env
+data/digest_prefs.json
+digest_outbox/*.html
+
