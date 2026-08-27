@@ -141,6 +141,31 @@ DEFAULT_RS_PARAMS = {
     "RS1": "RS1: Broad Market RS vs Nifty 50 (^NSEI)",
     "RS2": "RS2: Sector Peer Relative Strength",
 }
+FUND_HELP = {
+    "C": "On: the stock must show quarterly EPS growth above 15% year on year to earn this point. Off: this rule is ignored in the fundamental score.",
+    "A": "On: annual revenue growth must be above 10%. Off: sales growth is not part of the fundamental score.",
+    "N": "On: price must sit within 25% of the 52-week high. Off: proximity to highs is ignored.",
+    "S": "On: recent price action must look like a tight base (low volatility near the 50-DMA). Off: base tightness is ignored.",
+    "L": "On: daily RSI must be above 55 so the name is acting like a leader. Off: RSI leadership is ignored.",
+    "I": "On: reported institutional ownership must be above 30%. Off: ownership is ignored (data is often missing).",
+    "M": "On: Nifty 50 must be above its 200-day average for this point. Off: market direction is ignored.",
+}
+TECH_HELP = {
+    "T1": "On: close must be above the 200-DMA and within 5% of the 50-DMA. Off: this trend/mean-reversion check is skipped.",
+    "T2": "On: price must be coiled near the 50- and 20-DMA. Off: consolidation is not scored.",
+    "T3": "On: close cannot be more than 25% above the 200-DMA (early Stage 2). Off: extension is ignored.",
+    "T4": "On: both 200-DMA and 50-DMA must be sloping up over the last 5 bars. Off: moving-average slope is ignored.",
+    "T5": "On: monthly RSI must be above 50 and rising. Off: monthly RSI is ignored.",
+    "T6": "On: weekly RSI must be above 50 and rising. Off: weekly RSI is ignored.",
+    "T7": "On: daily RSI must be above 50 and rising. Off: daily RSI is ignored.",
+    "T8": "On: monthly MACD line must be rising. Off: monthly MACD is ignored.",
+    "T9": "On: weekly MACD must have a positive crossover and a rising line. Off: weekly MACD is ignored.",
+    "T10": "On: daily MACD line must be rising. Off: daily MACD is ignored.",
+}
+RS_HELP = {
+    "RS1": "On: 3-month return is compared with Nifty 50. Off: broad-market relative strength is dropped from the RS score.",
+    "RS2": "On: 3-month return is compared with same-sector peers in this scan. Off: sector relative strength is dropped.",
+}
 SECTOR_MAP = {
     "Financial Services": "Fin Services", "Consumer Cyclical": "Cons Cyclical",
     "Consumer Defensive": "Cons Defensive", "Healthcare": "Healthcare",
@@ -580,7 +605,11 @@ def render_login_screen():
         st.warning("⚠️ **Supabase configuration not detected.**")
         st.info("Configure `SUPABASE_URL` and `SUPABASE_KEY` in `.streamlit/secrets.toml` to enable auth & persistence.")
         
-        if st.button("Bypass Login (Developer / Local Mode)", use_container_width=True):
+        if st.button(
+            "Bypass Login (Developer / Local Mode)",
+            use_container_width=True,
+            help="Open the screener without Supabase. Settings stay on this device only and are not saved to the cloud.",
+        ):
             st.session_state["user"] = {"id": "local-dev-id", "email": "vkiyer@hotmail.com"}
             st.session_state["supabase_session"] = None
             st.rerun()
@@ -588,11 +617,30 @@ def render_login_screen():
     col1, col2 = st.columns([1, 1])
     with col1:
         st.subheader("Account Access")
-        auth_mode = st.radio("Choose Mode", ["Login", "Sign Up"], key="auth_mode")
-        email = st.text_input("Email", key="auth_email")
-        password = st.text_input("Password", type="password", key="auth_pass")
+        auth_mode = st.radio(
+            "Choose Mode",
+            ["Login", "Sign Up"],
+            key="auth_mode",
+            help="Login uses an existing account. Sign Up creates one; you may need to confirm email in Supabase before the first login.",
+        )
+        email = st.text_input(
+            "Email",
+            key="auth_email",
+            help="The address used for this account and, if you opt in, weekday morning scores.",
+        )
+        password = st.text_input(
+            "Password",
+            type="password",
+            key="auth_pass",
+            help="Supabase account password. This app never emails your password.",
+        )
         if auth_mode == "Login":
-            if st.button("Log In", use_container_width=True, type="primary"):
+            if st.button(
+                "Log In",
+                use_container_width=True,
+                type="primary",
+                help="Sign in and load your saved weights, rules, and morning-scores preference.",
+            ):
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state["user"] = res.user
@@ -606,7 +654,12 @@ def render_login_screen():
                 except Exception as e:
                     st.error(f"Login failed: {e}")
         else:
-            if st.button("Create Account", use_container_width=True, type="primary"):
+            if st.button(
+                "Create Account",
+                use_container_width=True,
+                type="primary",
+                help="Register this email. If confirmation is enabled in Supabase, check your inbox before logging in.",
+            ):
                 try:
                     res = supabase.auth.sign_up({"email": email, "password": password})
                     if res.user and res.session:
@@ -926,15 +979,17 @@ def fetch_info(ticker: str) -> dict:
 def customize_fundamental_modal():
     st.write("Select CANSLIM-7 criteria to include:")
     for k, label in DEFAULT_FUND_PARAMS.items():
-        st.session_state[f"fund_{k}"] = st.checkbox(label, value=st.session_state.get(f"fund_{k}", True))
+        st.session_state[f"fund_{k}"] = st.checkbox(
+            label, value=st.session_state.get(f"fund_{k}", True), help=FUND_HELP.get(k, "")
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_fund"):
+    if col1.button("Restore Defaults", key="reset_fund", help="Turn every fundamental rule back on and save."):
         for k in DEFAULT_FUND_PARAMS:
             st.session_state[f"fund_{k}"] = True
         save_user_settings_to_db()
         st.rerun()
-    if col2.button("Apply & Save", key="apply_fund"):
+    if col2.button("Apply & Save", key="apply_fund", help="Store these toggles for scans and the weekday morning scores email."):
         save_user_settings_to_db()
         st.rerun()
 @st.dialog("⚙️ Customize Technical Parameters")
@@ -942,15 +997,17 @@ def customize_fundamental_modal():
 def customize_technical_modal():
     st.write("Select rules to include in Technical Score:")
     for k, label in DEFAULT_TECH_PARAMS.items():
-        st.session_state[f"tech_{k}"] = st.checkbox(label, value=st.session_state.get(f"tech_{k}", True))
+        st.session_state[f"tech_{k}"] = st.checkbox(
+            label, value=st.session_state.get(f"tech_{k}", True), help=TECH_HELP.get(k, "")
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_tech"):
+    if col1.button("Restore Defaults", key="reset_tech", help="Turn every technical rule back on and save."):
         for k in DEFAULT_TECH_PARAMS:
             st.session_state[f"tech_{k}"] = True
         save_user_settings_to_db()
         st.rerun()
-    if col2.button("Apply & Save", key="apply_tech"):
+    if col2.button("Apply & Save", key="apply_tech", help="Store these toggles for scans and the weekday morning scores email."):
         save_user_settings_to_db()
         st.rerun()
 @st.dialog("⚙️ Customize Relative Strength Parameters")
@@ -958,15 +1015,17 @@ def customize_technical_modal():
 def customize_rs_modal():
     st.write("Select relative strength benchmarks to include:")
     for k, label in DEFAULT_RS_PARAMS.items():
-        st.session_state[f"rs_{k}"] = st.checkbox(label, value=st.session_state.get(f"rs_{k}", True))
+        st.session_state[f"rs_{k}"] = st.checkbox(
+            label, value=st.session_state.get(f"rs_{k}", True), help=RS_HELP.get(k, "")
+        )
     
     col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_rs"):
+    if col1.button("Restore Defaults", key="reset_rs", help="Turn both relative-strength benchmarks back on and save."):
         for k in DEFAULT_RS_PARAMS:
             st.session_state[f"rs_{k}"] = True
         save_user_settings_to_db()
         st.rerun()
-    if col2.button("Apply & Save", key="apply_rs"):
+    if col2.button("Apply & Save", key="apply_rs", help="Store these toggles for scans and the weekday morning scores email."):
         save_user_settings_to_db()
         st.rerun()
 @st.dialog("📊 Detailed Pillar Score Breakdown", width="large")
@@ -1029,7 +1088,12 @@ def show_pillar_details_modal(row_data):
         else:
             st.line_chart(history_df.set_index("scan_time")[["total_score", "fundamental_score", "technical_score", "rs_score"]])
     st.divider()
-    if st.button("❌ Close Breakdown", use_container_width=True, type="primary"):
+    if st.button(
+        "❌ Close Breakdown",
+        use_container_width=True,
+        type="primary",
+        help="Close this panel and return to the table.",
+    ):
         st.session_state["active_inspect_ticker"] = None
         st.rerun()
 
@@ -1366,7 +1430,11 @@ def _run_streamlit_ui():
     st.sidebar.markdown(f"👤 **User:** `{user_email}`")
     if user_is_admin:
         st.sidebar.markdown("⭐ **Role:** `Administrator`")
-    if st.sidebar.button("🚪 Log Out", use_container_width=True):
+    if st.sidebar.button(
+        "🚪 Log Out",
+        use_container_width=True,
+        help="End this session. Unsaved on-screen results are cleared; cloud settings stay in Supabase.",
+    ):
         supabase = get_supabase_client()
         if supabase:
             try:
@@ -1405,10 +1473,20 @@ def _run_streamlit_ui():
         save_user_settings_to_db()
         _persist_digest_pref()
     w_fund = st.sidebar.slider(
-        "Fundamental Weight", 0, 10, key="w_fund", on_change=on_weight_change
+        "Fundamental Weight",
+        0,
+        10,
+        key="w_fund",
+        on_change=on_weight_change,
+        help="How much the CANSLIM-style fundamental score counts in Total (0–10). Relative Strength is whatever is left so the three pillars sum to 10.",
     )
     w_tech = st.sidebar.slider(
-        "Technical Weight", 0, 10, key="w_tech", on_change=on_weight_change
+        "Technical Weight",
+        0,
+        10,
+        key="w_tech",
+        on_change=on_weight_change,
+        help="How much the 10-point technical score counts in Total. Keep Fundamental + Technical at or below 10 or Relative Strength becomes 0.",
     )
     w_rs_calc = 10 - w_fund - w_tech
     if w_rs_calc < 0:
@@ -1416,14 +1494,30 @@ def _run_streamlit_ui():
         w_rs = 0
     else:
         w_rs = w_rs_calc
-        st.sidebar.metric("Relative Strength Weight", w_rs)
+        st.sidebar.metric(
+            "Relative Strength Weight",
+            w_rs,
+            help="Set automatically as 10 minus Fundamental minus Technical. You cannot type this value.",
+        )
     st.sidebar.divider()
     st.sidebar.subheader("2. Pillar Customization")
-    if st.sidebar.button("⚙️ Fundamental Rules", use_container_width=True):
+    if st.sidebar.button(
+        "⚙️ Fundamental Rules",
+        use_container_width=True,
+        help="Choose which CANSLIM-style checks count toward the fundamental score. Disabled rules are skipped for every ticker.",
+    ):
         customize_fundamental_modal()
-    if st.sidebar.button("⚙️ Technical Rules", use_container_width=True):
+    if st.sidebar.button(
+        "⚙️ Technical Rules",
+        use_container_width=True,
+        help="Choose which of the 10 technical checks count. Each enabled rule that passes adds to the technical score.",
+    ):
         customize_technical_modal()
-    if st.sidebar.button("⚙️ Relative Strength Rules", use_container_width=True):
+    if st.sidebar.button(
+        "⚙️ Relative Strength Rules",
+        use_container_width=True,
+        help="Choose Nifty 50 and/or sector-peer relative strength. Disabled benchmarks are omitted from the RS score.",
+    ):
         customize_rs_modal()
 
     st.sidebar.divider()
@@ -1475,6 +1569,7 @@ def _run_streamlit_ui():
         step=1,
         key="digest_top_n",
         on_change=_on_digest_pref_change,
+        help="How many highest-scoring tickers to list under each index or F&O group in the weekday email (3–25).",
     )
     digest_quick = st.sidebar.checkbox(
         "Quick preview (Nifty 50 + Next 50 fallback lists)",
@@ -1482,7 +1577,11 @@ def _run_streamlit_ui():
         key="digest_quick_preview",
         help="Uncheck to score every live universe. That can take several minutes.",
     )
-    if st.sidebar.button("📬 Generate preview digest", use_container_width=True):
+    if st.sidebar.button(
+        "📬 Generate preview digest",
+        use_container_width=True,
+        help="Score the selected lists now and show the HTML on this page. Does not send email unless you click Send preview.",
+    ):
         from digest import run_digest, is_smtp_configured
         with st.spinner("Scoring universes for the morning email..."):
             digest_result = run_digest(
@@ -1501,7 +1600,11 @@ def _run_streamlit_ui():
 
     if st.session_state.get("digest_opt_in") and st.session_state.get("digest_preview"):
         from digest import is_smtp_configured
-        if is_smtp_configured() and st.sidebar.button("Send preview to my email", use_container_width=True):
+        if is_smtp_configured() and st.sidebar.button(
+            "Send preview to my email",
+            use_container_width=True,
+            help="Send the last preview HTML to the address on this login. Uses SMTP from secrets, not GitHub Actions.",
+        ):
             from digest import send_email
             html = st.session_state["digest_preview"].get("html") or ""
             status = send_email(user_email, "FunTech daily morning scores (preview)", html)
@@ -1543,7 +1646,7 @@ def _run_streamlit_ui():
             options=UNIVERSE_SOURCE_OPTIONS,
             index=UNIVERSE_SOURCE_OPTIONS.index("Nifty 500"),
             key="scr_universe_source",
-            help="Pulled live from NSE (cached 24h). Falls back to a small curated list if NSE is unreachable.",
+            help="Which NSE index or F&O list to load. Live constituents are cached 24 hours; if NSE is unreachable the app uses a small built-in list.",
         )
         with st.sidebar.status(f"Loading {universe_source}...", expanded=False) as _status:
             if universe_source == "F&O Stocks":
@@ -1574,7 +1677,11 @@ def _run_streamlit_ui():
         st.sidebar.caption("  \n".join(_freshness_lines))
         with st.sidebar.expander("📤 Upload Custom CSV/Excel List", expanded=False):
             uploaded_csv = st.file_uploader(
-                "Upload Universe File", type=["csv", "xlsx", "xls"], key="scr_csv", label_visibility="collapsed"
+                "Upload Universe File",
+                type=["csv", "xlsx", "xls"],
+                key="scr_csv",
+                label_visibility="collapsed",
+                help="Broker or custom list. The parser looks for a symbol column (Zerodha, Groww, Dhan, Upstox, and similar exports).",
             )
         csv_tickers = []
         if uploaded_csv is not None:
@@ -1606,8 +1713,13 @@ def _run_streamlit_ui():
             options=full_options,
             default=default_selection,
             key=f"scr_active_tickers::{universe_source}::{universe_state_tag}",
+            help="Tickers that will be scored. Deselect names to skip them. Switching index or uploading a file resets this list.",
         )
-        custom_raw = st.sidebar.text_input("Add Custom Tickers", value="")
+        custom_raw = st.sidebar.text_input(
+            "Add Custom Tickers",
+            value="",
+            help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added if you omit it.",
+        )
         custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
         watchlist_tickers = []
         # ==========================================================================
@@ -1648,7 +1760,11 @@ def _run_streamlit_ui():
                  "market close, or if you suspect stale data. This does NOT re-fetch the "
                  "universe list (Nifty 500 etc.) — that's cached separately for 24h.",
         )
-        run_scan = st.sidebar.button("🔍 Run Screener Scan", use_container_width=True)
+        run_scan = st.sidebar.button(
+            "🔍 Run Screener Scan",
+            use_container_width=True,
+            help="Score every ticker in Active Tickers plus any custom symbols, using the weights and rules above. Large lists take several minutes.",
+        )
         if run_scan:
             if not universe:
                 st.warning("Select at least one ticker.")
@@ -1672,9 +1788,21 @@ def _run_streamlit_ui():
             if not df.empty:
                 df = df.sort_values("Total Score", ascending=False).reset_index(drop=True)
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Screened Tickers", len(df))
-                c2.metric("Highest Total Score", f"{df['Total Score'].max():.2f}")
-                c3.metric("Average Score", f"{df['Total Score'].mean():.2f}")
+                c1.metric(
+                    "Screened Tickers",
+                    len(df),
+                    help="How many names returned a score. Skipped tickers (no price data) are listed separately if any failed.",
+                )
+                c2.metric(
+                    "Highest Total Score",
+                    f"{df['Total Score'].max():.2f}",
+                    help="Best Total in this scan under your current weights. Pillar scores themselves stay 0–10.",
+                )
+                c3.metric(
+                    "Average Score",
+                    f"{df['Total Score'].mean():.2f}",
+                    help="Mean Total across the screened set. Use it to see how demanding your weights and rules are.",
+                )
                 st.divider()
                 # Sector-level summary — quickly see which sectors are showing strength
                 # in this scan, without scrolling the full ticker-by-ticker table.
@@ -1808,7 +1936,15 @@ def _run_streamlit_ui():
                 col_tv1, col_tv2 = st.columns([1, 2])
             
                 with col_tv1:
-                    threshold = st.slider("Min Score Filter", 0.0, 10.0, 6.0, 0.5, key="scr_tv_thresh")
+                    threshold = st.slider(
+                        "Min Score Filter",
+                        0.0,
+                        10.0,
+                        6.0,
+                        0.5,
+                        key="scr_tv_thresh",
+                        help="Only names with Total at or above this value are listed for the TradingView paste. Does not change the table below.",
+                    )
             
                 filtered_df = df[df["Total Score"] >= threshold]
                 tv_symbols = [f"NSE:{s.replace('.NS', '')}" for s in filtered_df["Ticker"].tolist()]
@@ -1841,15 +1977,21 @@ def _run_streamlit_ui():
                 # ==========================================================================
                 with c_ctrl1:
                     selected_ticker = st.selectbox(
-                        "Select Stock to Inspect:", 
+                        "Select Stock to Inspect:",
                         options=df["Ticker"].tolist(),
                         key="scr_select_tkr",
-                        label_visibility="collapsed"
+                        help="Choose a row to open the pass/fail breakdown for each fundamental, technical, and RS rule.",
                     )
                 with c_ctrl2:
                     st.write(f"Selected: **{selected_ticker}**")
                 with c_ctrl3:
-                    if st.button("🔍 Breakdown", key="scr_view_btn", use_container_width=True, type="primary"):
+                    if st.button(
+                        "🔍 Breakdown",
+                        key="scr_view_btn",
+                        use_container_width=True,
+                        type="primary",
+                        help="Show why this ticker received its fundamental, technical, and relative-strength scores.",
+                    ):
                         st.session_state["active_inspect_ticker"] = selected_ticker
                         st.rerun()
                 # ==========================================================================
@@ -1876,10 +2018,18 @@ def _run_streamlit_ui():
                     hide_index=True,
                     column_config={
                         "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
-                        "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
-                        "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
-                        "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
-                        "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
+                        "Total Score": st.column_config.NumberColumn(
+                            "Total", format="%.2f", help="Weighted blend of Fund, Tech, and RS. At most 10 when pillar weights sum to 10."
+                        ),
+                        "Fundamental Score": st.column_config.NumberColumn(
+                            "Fund", format="%.2f", help="0–10 from enabled CANSLIM-style rules that this ticker passed."
+                        ),
+                        "Technical Score": st.column_config.NumberColumn(
+                            "Tech", format="%.2f", help="0–10 from enabled technical rules that this ticker passed."
+                        ),
+                        "Relative Strength Score": st.column_config.NumberColumn(
+                            "RS", format="%.2f", help="0–10 from enabled RS benchmarks versus Nifty 50 and/or sector peers."
+                        ),
                     }
                 )
                 st.divider()
@@ -1892,6 +2042,7 @@ def _run_streamlit_ui():
                         file_name=f"screener_results_{_export_stamp}.csv",
                         mime="text/csv",
                         use_container_width=True,
+                        help="Download every scored ticker from this scan as CSV, including pillar scores.",
                     )
                 with export_col2:
                     _excel_buf = io.BytesIO()
@@ -1903,6 +2054,7 @@ def _run_streamlit_ui():
                         file_name=f"screener_results_{_export_stamp}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
+                        help="Same full scan as the CSV export, in an Excel workbook.",
                     )
 
     # ==================================================================================
@@ -1918,7 +2070,12 @@ def _run_streamlit_ui():
     
         with col_input1:
             st.markdown("##### **Option A: Upload Broker Holdings Export**")
-            port_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx", "xls"], key="port_upload")
+            port_file = st.file_uploader(
+                "Upload CSV or Excel file",
+                type=["csv", "xlsx", "xls"],
+                key="port_upload",
+                help="Export holdings from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, or Kotak. The symbol column is detected automatically.",
+            )
         
             if port_file is not None:
                 try:
@@ -1936,7 +2093,12 @@ def _run_streamlit_ui():
                     st.error(f"Error reading file: {e}")
         with col_input2:
             st.markdown("##### **Option B: Paste Stock Symbols Directly**")
-            raw_pasted = st.text_area("Paste symbols (comma, space, or line separated):", placeholder="TATAMOTORS, HDFCBANK, TRENT, AUBANK", height=100)
+            raw_pasted = st.text_area(
+                "Paste symbols (comma, space, or line separated):",
+                placeholder="TATAMOTORS, HDFCBANK, TRENT, AUBANK",
+                height=100,
+                help="If you did not upload a file, paste NSE symbols here. Used only when the upload box is empty.",
+            )
         
             if raw_pasted.strip():
                 delimiters = [",", "\n", " ", ";"]
@@ -1957,7 +2119,11 @@ def _run_streamlit_ui():
         if parsed_portfolio_tickers:
             st.write(f"**Loaded Holdings ({len(parsed_portfolio_tickers)}):** `" + ", ".join([s.replace(".NS", "") for s in parsed_portfolio_tickers]) + "`")
         
-            if st.button("🚀 Evaluate Portfolio Health", use_container_width=True):
+            if st.button(
+                "🚀 Evaluate Portfolio Health",
+                use_container_width=True,
+                help="Score every loaded holding with the same weights and rules as the screener. Average Total is the portfolio health score.",
+            ):
                 with st.spinner("Evaluating portfolio holdings against 3-Pillar engine..."):
                     p_results, p_skipped = execute_scan(parsed_portfolio_tickers, w_fund, w_tech, w_rs)
                 
@@ -1970,9 +2136,21 @@ def _run_streamlit_ui():
             p_weak = p_results[p_results["Total Score"] < 5.0]
             p_strong = p_results[p_results["Total Score"] >= 7.0]
             col_p1, col_p2, col_p3 = st.columns(3)
-            col_p1.metric("Portfolio Health Score", f"{p_avg_score:.2f} / 10")
-            col_p2.metric("Strong Holdings (Score ≥ 7.0)", len(p_strong))
-            col_p3.metric("Weak Holdings (Score < 5.0)", len(p_weak))
+            col_p1.metric(
+                "Portfolio Health Score",
+                f"{p_avg_score:.2f} / 10",
+                help="Average Total score across holdings. It uses the same engine as the screener, not broker P&L.",
+            )
+            col_p2.metric(
+                "Strong Holdings (Score ≥ 7.0)",
+                len(p_strong),
+                help="Count of names whose Total is 7.0 or higher under your current weights and rules.",
+            )
+            col_p3.metric(
+                "Weak Holdings (Score < 5.0)",
+                len(p_weak),
+                help="Count of names whose Total is below 5.0. Inspect the breakdown before acting; this is not a sell call.",
+            )
             st.divider()
             st.subheader("📊 Portfolio Scoring Matrix")
             st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
@@ -1984,15 +2162,21 @@ def _run_streamlit_ui():
             c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 2, 1])
             with c_ctrl1:
                 p_selected_ticker = st.selectbox(
-                    "Select Holding to Inspect:", 
+                    "Select Holding to Inspect:",
                     options=p_results["Ticker"].tolist(),
                     key="port_select_tkr",
-                    label_visibility="collapsed"
+                    help="Choose a holding to open the pass/fail breakdown for each scoring rule.",
                 )
             with c_ctrl2:
                 st.write(f"Selected: **{p_selected_ticker}**")
             with c_ctrl3:
-                if st.button("🔍 Breakdown", key="port_view_btn", use_container_width=True, type="primary"):
+                if st.button(
+                    "🔍 Breakdown",
+                    key="port_view_btn",
+                    use_container_width=True,
+                    type="primary",
+                    help="Show why this holding received its fundamental, technical, and relative-strength scores.",
+                ):
                     st.session_state["active_inspect_ticker"] = p_selected_ticker
                     st.rerun()
             st.dataframe(
@@ -2001,10 +2185,18 @@ def _run_streamlit_ui():
                 hide_index=True,
                 column_config={
                     "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
-                    "Total Score": st.column_config.NumberColumn("Total", format="%.2f"),
-                    "Fundamental Score": st.column_config.NumberColumn("Fund", format="%.2f"),
-                    "Technical Score": st.column_config.NumberColumn("Tech", format="%.2f"),
-                    "Relative Strength Score": st.column_config.NumberColumn("RS", format="%.2f"),
+                    "Total Score": st.column_config.NumberColumn(
+                        "Total", format="%.2f", help="Weighted blend of Fund, Tech, and RS. At most 10 when pillar weights sum to 10."
+                    ),
+                    "Fundamental Score": st.column_config.NumberColumn(
+                        "Fund", format="%.2f", help="0–10 from enabled CANSLIM-style rules that this holding passed."
+                    ),
+                    "Technical Score": st.column_config.NumberColumn(
+                        "Tech", format="%.2f", help="0–10 from enabled technical rules that this holding passed."
+                    ),
+                    "Relative Strength Score": st.column_config.NumberColumn(
+                        "RS", format="%.2f", help="0–10 from enabled RS benchmarks versus Nifty 50 and/or sector peers."
+                    ),
                 }
             )
             st.divider()
@@ -2013,7 +2205,8 @@ def _run_streamlit_ui():
                 data=p_results.to_csv(index=False).encode("utf-8"),
                 file_name="portfolio_evaluation_results.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                help="Download the scored holdings table as CSV.",
             )
 
     # ==================================================================================
@@ -2024,8 +2217,7 @@ def _run_streamlit_ui():
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
         st.markdown(
             """
-            Welcome to the **Quantitative Multi-Pillar Engine**. Below are direct, step-by-step instructions
-            for screening market candidates, evaluating portfolio health, customizing scoring weights, and exporting to TradingView.
+            Welcome to the **Quantitative Multi-Pillar Engine**. Hover the small **?** next to a control for a one- or two-sentence explanation. Below are step-by-step workflows for screening, portfolio health, weights, and TradingView export.
             """
         )
     
@@ -2129,10 +2321,18 @@ def _run_streamlit_ui():
                     }
                 })
             
-                if st.button("🧹 Clear Global Application Cache", use_container_width=True):
+                if st.button(
+                    "🧹 Clear Global Application Cache",
+                    use_container_width=True,
+                    help="Drop cached NSE lists and price downloads so the next scan fetches live data. Does not delete user settings.",
+                ):
                     st.cache_data.clear()
                     st.success("Global application cache cleared.")
-                if st.button("🌐 Check Universe Source Status (live fetch)", use_container_width=True):
+                if st.button(
+                    "🌐 Check Universe Source Status (live fetch)",
+                    use_container_width=True,
+                    help="Hit NSE for every index and F&O source and report whether live lists or fallbacks were used.",
+                ):
                     with st.spinner("Fetching all 6 universe sources — this hits NSE live and may take a moment..."):
                         status_rows = []
                         for name in NSE_INDEX_FILES:
