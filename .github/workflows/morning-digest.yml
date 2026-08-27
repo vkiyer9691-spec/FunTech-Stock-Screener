@@ -1,0 +1,45 @@
+name: Morning stock-pick digest
+
+# 08:30 Asia/Kolkata = 03:00 UTC. Indian cash market opens 09:15 IST.
+on:
+  schedule:
+    - cron: "0 3 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      quick:
+        description: "Use Nifty 50 + Next 50 fallback lists only"
+        type: boolean
+        default: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run digest
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          QUICK_FLAG=""
+          if [ "${{ github.event.inputs.quick }}" = "true" ]; then
+            QUICK_FLAG="--quick"
+          fi
+          python run_daily_digest.py --send --force-weekend $QUICK_FLAG
+      - name: Upload HTML preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morning-digest
+          path: digest_outbox/
+          if-no-files-found: ignore
