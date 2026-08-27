@@ -72,11 +72,32 @@ DISCLAIMER = (
 )
 
 
+def clamp_pillar_weights(w_fund, w_tech, w_rs=None) -> tuple[int, int, int]:
+    """Match the sidebar: RS is the leftover of 10, never an independent extra weight.
+
+    A stale user_settings.w_rs (e.g. 2 while fund=1 and tech=9) used to make
+    weights sum to 12 and Total scores exceed 10.
+    """
+    w_fund = max(0, min(10, int(w_fund)))
+    w_tech = max(0, min(10, int(w_tech)))
+    w_rs = max(0, 10 - w_fund - w_tech)
+    return w_fund, w_tech, w_rs
+
+
+def weighted_total(fund_score: float, tech_score: float, rs_score: float, w_fund: int, w_tech: int, w_rs: int) -> float:
+    denom = w_fund + w_tech + w_rs
+    if denom <= 0:
+        return 0.0
+    return (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / denom
+
+
 def normalize_settings(settings: dict | None) -> dict:
     settings = settings or {}
-    w_fund = int(settings.get("w_fund", DEFAULT_WEIGHTS[0]))
-    w_tech = int(settings.get("w_tech", DEFAULT_WEIGHTS[1]))
-    w_rs = int(settings.get("w_rs", max(0, 10 - w_fund - w_tech)))
+    w_fund, w_tech, w_rs = clamp_pillar_weights(
+        settings.get("w_fund", DEFAULT_WEIGHTS[0]),
+        settings.get("w_tech", DEFAULT_WEIGHTS[1]),
+        settings.get("w_rs"),
+    )
     fund_rules = dict(settings.get("fund_rules") or {})
     tech_rules = dict(settings.get("tech_rules") or {})
     rs_rules = dict(settings.get("rs_rules") or {})
@@ -125,12 +146,7 @@ def subscriber_from_settings_row(row: dict, email: str) -> dict | None:
         "email": email.strip(),
         "opt_in": True,
         "top_n": max(3, min(25, int(row.get("digest_top_n") or DEFAULT_TOP_N))),
-        "w_fund": row.get("w_fund", DEFAULT_WEIGHTS[0]),
-        "w_tech": row.get("w_tech", DEFAULT_WEIGHTS[1]),
-        "w_rs": row.get("w_rs", DEFAULT_WEIGHTS[2]),
-        "fund_rules": row.get("fund_rules") or {},
-        "tech_rules": row.get("tech_rules") or {},
-        "rs_rules": row.get("rs_rules") or {},
+        **{k: v for k, v in normalize_settings(row).items() if k != "overrides"},
     }
 
 
@@ -309,9 +325,10 @@ def rank_universes(results_df: pd.DataFrame, universe_map: dict[str, list], top_
 def render_html(sections: list[dict], generated_at: datetime, top_n: int, settings: dict | None = None) -> str:
     when = generated_at.astimezone(IST).strftime("%A, %d %b %Y, %H:%M IST")
     cfg = normalize_settings(settings)
+    weight_sum = cfg["w_fund"] + cfg["w_tech"] + cfg["w_rs"]
     settings_line = (
         f"Your weights: Fundamental {cfg['w_fund']} / Technical {cfg['w_tech']} / "
-        f"Relative Strength {cfg['w_rs']} (sum 10). Rankings use only the rules you have enabled."
+        f"Relative Strength {cfg['w_rs']} (sum {weight_sum}). Rankings use only the rules you have enabled."
     )
     blocks = []
     for sec in sections:

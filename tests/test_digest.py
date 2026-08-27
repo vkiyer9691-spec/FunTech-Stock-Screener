@@ -7,14 +7,17 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from digest import (
+    clamp_pillar_weights,
     extra_recipients_from_env,
     extract_email_address,
     is_weekday_ist,
+    normalize_settings,
     rank_universes,
     render_html,
     smtp_from_parts,
     smtp_reply_to_header,
     subscriber_from_settings_row,
+    weighted_total,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -79,7 +82,41 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(sub["email"], "trader@example.com")
         self.assertEqual(sub["top_n"], 10)
         self.assertEqual(sub["w_fund"], 5)
+        self.assertEqual(sub["w_rs"], 2)
         self.assertIsNone(subscriber_from_settings_row({**row, "digest_opt_in": False}, "trader@example.com"))
+
+        stale = subscriber_from_settings_row(
+            {**row, "w_fund": 1, "w_tech": 9, "w_rs": 2},
+            "trader@example.com",
+        )
+        self.assertEqual(stale["w_rs"], 0)
+        self.assertEqual(stale["w_fund"] + stale["w_tech"] + stale["w_rs"], 10)
+
+    def test_stale_rs_weight_cannot_push_total_over_ten(self):
+        self.assertEqual(clamp_pillar_weights(1, 9, 2), (1, 9, 0))
+        total = round(weighted_total(5.71, 10.0, 10.0, *clamp_pillar_weights(1, 9, 2)), 2)
+        self.assertEqual(total, 9.57)
+        self.assertLessEqual(total, 10)
+        over = normalize_settings({"w_fund": 1, "w_tech": 9, "w_rs": 2})
+        self.assertEqual(over["w_rs"], 0)
+        html = render_html(
+            [{
+                "universe": "Nifty 50",
+                "tickers_scanned": 50,
+                "rows": [{
+                    "Ticker": "ICICIBANK.NS",
+                    "Total Score": total,
+                    "Fundamental Score": 5.71,
+                    "Technical Score": 10.0,
+                    "Relative Strength Score": 10.0,
+                    "Sector": "Fin Services",
+                }],
+            }],
+            datetime(2026, 8, 28, 1, 11, tzinfo=IST),
+            10,
+            over,
+        )
+        self.assertIn("Fundamental 1 / Technical 9 / Relative Strength 0 (sum 10)", html)
 
     def test_extract_email_and_digest_to(self):
         self.assertEqual(extract_email_address("FunTech <you@gmail.com>"), "you@gmail.com")

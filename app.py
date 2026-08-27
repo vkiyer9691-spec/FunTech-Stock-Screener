@@ -1278,6 +1278,8 @@ def fetch_single_stock(tkr: str):
     return tkr, daily, info
 
 def execute_scan(ticker_list, w_fund, w_tech, w_rs, show_progress=True):
+    from digest import clamp_pillar_weights, weighted_total
+    w_fund, w_tech, w_rs = clamp_pillar_weights(w_fund, w_tech, w_rs)
     bench_daily = fetch_daily(BENCHMARK)
     stock_data = {}
     sector_returns = {}
@@ -1326,7 +1328,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs, show_progress=True):
         fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily)
         tech_score, tech_status, raw_tech = compute_technical_score(daily)
         rs_score, rs_status, raw_rs = compute_relative_strength_score(daily, bench_daily, sec_ret)
-        total_score = (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / 10
+        total_score = weighted_total(fund_score, tech_score, rs_score, w_fund, w_tech, w_rs)
         results.append({
             "Ticker": tkr,
             "Total Score": round(total_score, 2),
