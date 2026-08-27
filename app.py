@@ -1028,7 +1028,19 @@ def customize_rs_modal():
     if col2.button("Apply & Save", key="apply_rs", help="Store these toggles for scans and the weekday morning scores email."):
         save_user_settings_to_db()
         st.rerun()
-@st.dialog("📊 Detailed Pillar Score Breakdown", width="large")
+
+@st.dialog("FunTech daily morning scores", width="large")
+def show_digest_preview_modal(preview: dict):
+    st.caption(
+        f"Scored {preview.get('ticker_count', 0)} unique tickers. "
+        "This window is a one-time preview — it will not stay on the screener, portfolio, or other tabs."
+    )
+    st.components.v1.html(preview.get("html") or "", height=640, scrolling=True)
+    if preview.get("outbox_path"):
+        st.caption(f"Also saved to `{preview.get('outbox_path')}`.")
+    if st.button("Done", type="primary", use_container_width=True, help="Close this preview. It will not appear again until you generate a new one."):
+        st.session_state["digest_preview_open"] = False
+        st.rerun()
 
 def show_pillar_details_modal(row_data):
     ticker = row_data['Ticker']
@@ -1580,7 +1592,7 @@ def _run_streamlit_ui():
     if st.sidebar.button(
         "📬 Generate preview digest",
         use_container_width=True,
-        help="Score the selected lists now and show the HTML on this page. Does not send email unless you click Send preview.",
+        help="Score the selected lists and open a one-time preview window. It will not stay on other tabs.",
     ):
         from digest import run_digest, is_smtp_configured
         with st.spinner("Scoring universes for the morning email..."):
@@ -1593,8 +1605,9 @@ def _run_streamlit_ui():
                 settings=_snapshot_engine(),
             )
         st.session_state["digest_preview"] = digest_result
+        st.session_state["digest_preview_open"] = digest_result.get("status") == "ok"
         if digest_result.get("status") == "ok":
-            st.sidebar.success("Preview ready — scroll the main page.")
+            st.sidebar.success("Preview opened. Close it when you are done — it will not follow you to other tabs.")
         else:
             st.sidebar.warning(digest_result.get("status"))
 
@@ -1617,6 +1630,12 @@ def _run_streamlit_ui():
     # Dynamic Navigation Tabs
 
     # ----------------------------------------------------------------------------------
+    # Preview is a one-shot dialog: show it, then drop the flag so a later tab
+    # click or other widget rerun cannot paint the scores on the page again.
+    if st.session_state.get("digest_preview_open") and st.session_state.get("digest_preview"):
+        show_digest_preview_modal(st.session_state["digest_preview"])
+        st.session_state["digest_preview_open"] = False
+
     tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
@@ -1625,14 +1644,6 @@ def _run_streamlit_ui():
     tab_portfolio = tabs[1]
     tab_guide = tabs[2]
     tab_admin = tabs[3] if user_is_admin else None
-    if st.session_state.get("digest_preview"):
-        preview = st.session_state["digest_preview"]
-        st.info(
-            f"Morning digest preview saved to `{preview.get('outbox_path')}`. "
-            f"Scored {preview.get('ticker_count', 0)} unique tickers. "
-            "SMTP is optional — without it, open the HTML file instead of expecting an inbox message."
-        )
-        st.components.v1.html(preview.get("html") or "", height=640, scrolling=True)
 
     # ==================================================================================
     # TAB 1: STOCK SCREENER
