@@ -52,9 +52,20 @@ python run_daily_digest.py --preview --quick
 python run_daily_digest.py --send
 ```
 
-GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**. Add `SMTP_*` repository secrets if you want real delivery. Without SMTP, the job still writes the HTML artifact.
+GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**.
 
-Local preferences are stored in `data/digest_prefs.json` as a fallback. The weekday GitHub Action loads opted-in users from Supabase `user_settings` (requires `digest_opt_in` columns — see `supabase_digest.sql`) plus `profiles.email`. The Action should use GitHub secret `SUPABASE_SERVICE_ROLE_KEY` (service role). Streamlit Cloud should keep using the **anon** key only.
+To test delivery, use **Actions → Morning stock-pick digest → Run workflow** on branch `main` (do not click **Re-run** on an old run — that replays the old commit, including Node 20 actions). Leave **Quick preview** on, and optionally fill **Also send to this email**.
+
+Required for inbox delivery:
+
+- Repository secrets `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`
+- `SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` (service role, Actions only)
+- Run `supabase_digest.sql` in the Supabase SQL editor, then opt in on **Streamlit Cloud** (not only a local Windows copy)
+- Optional: `DIGEST_TO` if you want a copy even when opt-in lookup fails
+
+A green check with `"deliveries": []` means SMTP worked but **nobody was on the recipient list**. The job now fails in that case unless it can send a fallback copy to `SMTP_FROM`.
+
+Local preferences are stored in `data/digest_prefs.json` as a fallback. Streamlit Cloud should keep using the **anon** key only.
 
 ## Project layout
 

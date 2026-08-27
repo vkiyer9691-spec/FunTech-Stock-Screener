@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from digest import DEFAULT_TOP_N, run_digest
 
@@ -36,7 +37,19 @@ def main() -> int:
     print(json.dumps(printable, indent=2, default=str))
     if result.get("outbox_path"):
         print(f"\nPreview file: {result['outbox_path']}")
-    return 0 if result.get("status") in {"ok", "skipped-weekend"} else 1
+    status = result.get("status")
+    if status == "skipped-weekend":
+        return 0
+    if status == "no-subscribers":
+        print("No opted-in subscribers and no --to / DIGEST_TO / SMTP_FROM recipient.", file=sys.stderr)
+        return 1
+    if not args.send:
+        return 0 if status == "ok" else 1
+    sent = any(d.get("status") == "sent" for d in (result.get("deliveries") or []))
+    if sent:
+        return 0
+    print("SMTP did not deliver any message. Check SMTP_* secrets and the deliveries list above.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

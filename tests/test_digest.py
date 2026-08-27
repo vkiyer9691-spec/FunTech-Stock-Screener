@@ -1,10 +1,19 @@
+import os
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from digest import is_weekday_ist, rank_universes, render_html, subscriber_from_settings_row
+from digest import (
+    extra_recipients_from_env,
+    extract_email_address,
+    is_weekday_ist,
+    rank_universes,
+    render_html,
+    subscriber_from_settings_row,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -68,6 +77,15 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(sub["top_n"], 10)
         self.assertEqual(sub["w_fund"], 5)
         self.assertIsNone(subscriber_from_settings_row({**row, "digest_opt_in": False}, "trader@example.com"))
+
+    def test_extract_email_and_digest_to(self):
+        self.assertEqual(extract_email_address("FunTech <you@gmail.com>"), "you@gmail.com")
+        self.assertEqual(extract_email_address("not-an-email"), "")
+        with patch.dict(os.environ, {"DIGEST_TO": "beta@example.com"}):
+            self.assertEqual(
+                extra_recipients_from_env(["alpha@example.com", "alpha@example.com"]),
+                ["alpha@example.com", "beta@example.com"],
+            )
 
 
 if __name__ == "__main__":

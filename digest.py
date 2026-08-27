@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import smtplib
+import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -129,6 +130,26 @@ def subscriber_from_settings_row(row: dict, email: str) -> dict | None:
     }
 
 
+def _log(msg: str) -> None:
+    print(f"digest: {msg}", file=sys.stderr, flush=True)
+
+
+def extract_email_address(raw: str) -> str:
+    text = (raw or "").strip()
+    if "<" in text and ">" in text:
+        text = text.split("<", 1)[1].split(">", 1)[0].strip()
+    return text if "@" in text else ""
+
+
+def extra_recipients_from_env(explicit: list[str] | None = None) -> list[str]:
+    seen: list[str] = []
+    for item in list(explicit or []) + [part.strip() for part in (_mail_cfg("DIGEST_TO") or "").split(",")]:
+        addr = extract_email_address(item)
+        if addr and addr.lower() not in {s.lower() for s in seen}:
+            seen.append(addr)
+    return seen
+
+
 def _supabase_job_client():
     """Server-side client for the morning job. Prefer the service role so RLS
     does not hide other users' opt-in rows. Never put the service role in the
@@ -136,15 +157,49 @@ def _supabase_job_client():
     try:
         from supabase import create_client
     except ImportError:
+        _log("supabase package is not installed")
         return None
     url = _mail_cfg("SUPABASE_URL")
     key = _mail_cfg("SUPABASE_SERVICE_ROLE_KEY") or _mail_cfg("SUPABASE_KEY")
     if not url or not key:
+        _log("no SUPABASE_URL / key for subscriber lookup")
         return None
+    if not _mail_cfg("SUPABASE_SERVICE_ROLE_KEY"):
+        _log("SUPABASE_SERVICE_ROLE_KEY is missing; anon key may be blocked by RLS")
     try:
         return create_client(url, key)
-    except Exception:
+    except Exception as exc:
+        _log(f"could not create Supabase client: {exc}")
         return None
+
+
+def _emails_by_user_id(client) -> dict:
+    emails: dict = {}
+    try:
+        profiles_res = client.table("profiles").select("id,email").execute()
+        for p in profiles_res.data or []:
+            if p.get("id") and p.get("email"):
+                emails[p["id"]] = p["email"]
+        _log(f"profiles rows with email: {len(emails)}")
+    except Exception as exc:
+        _log(f"profiles lookup failed: {exc}")
+    if _mail_cfg("SUPABASE_SERVICE_ROLE_KEY"):
+        try:
+            listed = client.auth.admin.list_users()
+            users = getattr(listed, "users", None)
+            if users is None:
+                users = listed if isinstance(listed, list) else []
+            added = 0
+            for user in users or []:
+                uid = getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else None)
+                email = getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else None)
+                if uid and email and uid not in emails:
+                    emails[uid] = email
+                    added += 1
+            _log(f"auth.admin emails added: {added}")
+        except Exception as exc:
+            _log(f"auth.admin list_users failed: {exc}")
+    return emails
 
 
 def list_subscribers_from_supabase() -> list[dict]:
@@ -153,34 +208,37 @@ def list_subscribers_from_supabase() -> list[dict]:
         return []
     try:
         settings_res = client.table("user_settings").select("*").eq("digest_opt_in", True).execute()
-    except Exception:
+    except Exception as exc:
+        _log(f"user_settings digest_opt_in query failed: {exc}")
         return []
-    emails = {}
-    try:
-        profiles_res = client.table("profiles").select("id,email").execute()
-        for p in profiles_res.data or []:
-            if p.get("id") and p.get("email"):
-                emails[p["id"]] = p["email"]
-    except Exception:
-        pass
+    opted_in = list(settings_res.data or [])
+    _log(f"user_settings opted-in rows: {len(opted_in)}")
+    emails = _emails_by_user_id(client)
     subs = []
-    for row in settings_res.data or []:
+    missing_email = 0
+    for row in opted_in:
         uid = row.get("user_id")
         email = emails.get(uid) or row.get("email") or ""
         sub = subscriber_from_settings_row(row, email)
         if sub:
             subs.append(sub)
+        else:
+            missing_email += 1
+    if missing_email:
+        _log(f"opted-in rows skipped (no email): {missing_email}")
     return subs
 
 
 def list_subscribers() -> list[dict]:
     cloud = list_subscribers_from_supabase()
     if cloud:
+        _log(f"using {len(cloud)} Supabase subscriber(s)")
         return cloud
     subs = []
     for user_id, row in load_all_prefs().items():
         if row.get("opt_in") and row.get("email"):
             subs.append({"user_id": user_id, **row})
+    _log(f"Supabase returned nobody; local digest_prefs.json subscribers: {len(subs)}")
     return subs
 
 
@@ -350,13 +408,42 @@ def run_digest(
 
     subject = f"FunTech morning picks — {generated_at.strftime('%d %b %Y')}"
     deliveries = []
+    extras = extra_recipients_from_env(extra_recipients)
+    used_smtp_from_fallback = False
 
     if send:
         last_html = ""
         last_path = None
         last_sections = []
         skipped = []
-        for sub in list_subscribers():
+        subscribers = list_subscribers()
+        if not subscribers and not extras:
+            fallback = extract_email_address(_mail_cfg("SMTP_FROM"))
+            if fallback:
+                extras = [fallback]
+                used_smtp_from_fallback = True
+                _log(f"no opted-in subscribers; sending a fallback copy to SMTP_FROM ({fallback})")
+        if not subscribers and not extras:
+            cfg = normalize_settings(settings)
+            results_df, skipped = _score_universe(screener, all_tickers, cfg, show_progress=not quick)
+            last_sections = rank_universes(results_df, universe_map, top_n)
+            last_html = render_html(last_sections, generated_at, top_n, cfg)
+            last_path = write_outbox(last_html, generated_at)
+            _log("nobody to email. Opt in on Streamlit Cloud, run supabase_digest.sql, and add SUPABASE_SERVICE_ROLE_KEY.")
+            return {
+                "status": "no-subscribers",
+                "html": last_html,
+                "outbox_path": str(last_path) if last_path else None,
+                "sections": last_sections,
+                "skipped_tickers": skipped,
+                "ticker_count": len(all_tickers),
+                "quick": quick,
+                "smtp_configured": is_smtp_configured(),
+                "deliveries": [],
+                "used_smtp_from_fallback": False,
+                "generated_at": generated_at.isoformat(),
+            }
+        for sub in subscribers:
             sub_settings = normalize_settings(sub)
             sub_n = int(sub.get("top_n") or top_n)
             results_df, skipped = _score_universe(screener, all_tickers, sub_settings, show_progress=not quick)
@@ -369,13 +456,21 @@ def run_digest(
             except Exception as exc:
                 status = f"error:{exc}"
             deliveries.append({"email": sub["email"], "status": status, "top_n": sub_n})
-        for addr in extra_recipients or []:
-            if last_html:
-                try:
-                    status = send_email(addr, subject, last_html)
-                except Exception as exc:
-                    status = f"error:{exc}"
-                deliveries.append({"email": addr, "status": status})
+        if extras and not last_html:
+            cfg = normalize_settings(settings)
+            results_df, skipped = _score_universe(screener, all_tickers, cfg, show_progress=not quick)
+            last_sections = rank_universes(results_df, universe_map, top_n)
+            last_html = render_html(last_sections, generated_at, top_n, cfg)
+            last_path = write_outbox(last_html, generated_at)
+        sent_already = {d["email"].lower() for d in deliveries}
+        for addr in extras:
+            if addr.lower() in sent_already or not last_html:
+                continue
+            try:
+                status = send_email(addr, subject, last_html)
+            except Exception as exc:
+                status = f"error:{exc}"
+            deliveries.append({"email": addr, "status": status, "fallback": used_smtp_from_fallback})
         return {
             "status": "ok",
             "html": last_html,
@@ -386,6 +481,7 @@ def run_digest(
             "quick": quick,
             "smtp_configured": is_smtp_configured(),
             "deliveries": deliveries,
+            "used_smtp_from_fallback": used_smtp_from_fallback,
             "generated_at": generated_at.isoformat(),
         }
 

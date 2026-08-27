@@ -7,9 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       quick:
-        description: "Use Nifty 50 + Next 50 fallback lists only"
+        description: "Use Nifty 50 + Next 50 fallback lists only (recommended for a test run)"
         type: boolean
-        default: false
+        default: true
+      to:
+        description: "Also send to this email (even if nobody is opted in on Streamlit Cloud)"
+        type: string
+        required: false
 
 jobs:
   digest:
@@ -31,12 +35,17 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
         run: |
-          QUICK_FLAG=""
+          set -euo pipefail
+          ARGS=(--send --force-weekend)
           if [ "${{ github.event.inputs.quick }}" = "true" ]; then
-            QUICK_FLAG="--quick"
+            ARGS+=(--quick)
           fi
-          python run_daily_digest.py --send --force-weekend $QUICK_FLAG
+          if [ -n "${{ github.event.inputs.to }}" ]; then
+            ARGS+=(--to "${{ github.event.inputs.to }}")
+          fi
+          python run_daily_digest.py "${ARGS[@]}"
       - name: Upload HTML preview
         if: always()
         uses: actions/upload-artifact@v5
