@@ -115,7 +115,71 @@ def save_pref(user_id: str, email: str, opt_in: bool, top_n: int, settings: dict
     PREFS_PATH.write_text(json.dumps(data, indent=2))
 
 
+def subscriber_from_settings_row(row: dict, email: str) -> dict | None:
+    if not email or not row.get("digest_opt_in"):
+        return None
+    return {
+        "user_id": row.get("user_id"),
+        "email": email.strip(),
+        "opt_in": True,
+        "top_n": max(3, min(25, int(row.get("digest_top_n") or DEFAULT_TOP_N))),
+        "w_fund": row.get("w_fund", DEFAULT_WEIGHTS[0]),
+        "w_tech": row.get("w_tech", DEFAULT_WEIGHTS[1]),
+        "w_rs": row.get("w_rs", DEFAULT_WEIGHTS[2]),
+        "fund_rules": row.get("fund_rules") or {},
+        "tech_rules": row.get("tech_rules") or {},
+        "rs_rules": row.get("rs_rules") or {},
+    }
+
+
+def _supabase_job_client():
+    """Server-side client for the morning job. Prefer the service role so RLS
+    does not hide other users' opt-in rows. Never put the service role in the
+    Streamlit browser app — GitHub Actions secrets only."""
+    try:
+        from supabase import create_client
+    except ImportError:
+        return None
+    url = _mail_cfg("SUPABASE_URL")
+    key = _mail_cfg("SUPABASE_SERVICE_ROLE_KEY") or _mail_cfg("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def list_subscribers_from_supabase() -> list[dict]:
+    client = _supabase_job_client()
+    if not client:
+        return []
+    try:
+        settings_res = client.table("user_settings").select("*").eq("digest_opt_in", True).execute()
+    except Exception:
+        return []
+    emails = {}
+    try:
+        profiles_res = client.table("profiles").select("id,email").execute()
+        for p in profiles_res.data or []:
+            if p.get("id") and p.get("email"):
+                emails[p["id"]] = p["email"]
+    except Exception:
+        pass
+    subs = []
+    for row in settings_res.data or []:
+        uid = row.get("user_id")
+        email = emails.get(uid) or row.get("email") or ""
+        sub = subscriber_from_settings_row(row, email)
+        if sub:
+            subs.append(sub)
+    return subs
+
+
 def list_subscribers() -> list[dict]:
+    cloud = list_subscribers_from_supabase()
+    if cloud:
+        return cloud
     subs = []
     for user_id, row in load_all_prefs().items():
         if row.get("opt_in") and row.get("email"):

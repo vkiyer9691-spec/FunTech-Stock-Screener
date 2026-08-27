@@ -54,7 +54,7 @@ python run_daily_digest.py --send
 
 GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**. Add `SMTP_*` repository secrets if you want real delivery. Without SMTP, the job still writes the HTML artifact.
 
-Local preferences are stored in `data/digest_prefs.json`. Optional SQL for Supabase columns is in `supabase_digest.sql`.
+Local preferences are stored in `data/digest_prefs.json` as a fallback. The weekday GitHub Action loads opted-in users from Supabase `user_settings` (requires `digest_opt_in` columns — see `supabase_digest.sql`) plus `profiles.email`. The Action should use GitHub secret `SUPABASE_SERVICE_ROLE_KEY` (service role). Streamlit Cloud should keep using the **anon** key only.
 
 ## Project layout
 

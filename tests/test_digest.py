@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from digest import is_weekday_ist, rank_universes, render_html
+from digest import is_weekday_ist, rank_universes, render_html, subscriber_from_settings_row
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -53,6 +53,21 @@ class DigestTests(unittest.TestCase):
         self.assertIn("not a stock recommendation", html.lower())
         self.assertIn("consult your financial advisor", html.lower())
         self.assertIn("user-selected settings and weightages", html.lower())
+
+    def test_subscriber_from_supabase_row(self):
+        row = {
+            "user_id": "abc",
+            "digest_opt_in": True,
+            "digest_top_n": 10,
+            "w_fund": 5,
+            "w_tech": 3,
+            "fund_rules": {"C": True},
+        }
+        sub = subscriber_from_settings_row(row, "trader@example.com")
+        self.assertEqual(sub["email"], "trader@example.com")
+        self.assertEqual(sub["top_n"], 10)
+        self.assertEqual(sub["w_fund"], 5)
+        self.assertIsNone(subscriber_from_settings_row({**row, "digest_opt_in": False}, "trader@example.com"))
 
 
 if __name__ == "__main__":
