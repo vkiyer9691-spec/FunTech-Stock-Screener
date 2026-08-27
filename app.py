@@ -1427,10 +1427,10 @@ def _run_streamlit_ui():
         customize_rs_modal()
 
     st.sidebar.divider()
-    st.sidebar.subheader("Morning email digest")
+    st.sidebar.subheader("Daily morning scores")
     st.sidebar.caption(
-        "Weekdays at 8:30 AM IST — top picks from each universe before the cash market opens at 9:15. "
-        "Uses your pillar weights and which rules you have turned on."
+        "Weekdays at 8:30 AM IST — score ranking for each index/group before the cash market opens at 9:15. "
+        "Uses your pillar weights and which rules you have turned on. Not a stock pick or recommendation."
     )
 
     def _snapshot_engine():
@@ -1463,13 +1463,13 @@ def _run_streamlit_ui():
         _persist_digest_pref()
 
     st.sidebar.checkbox(
-        "Email me weekday morning picks",
+        "Email me weekday morning scores",
         key="digest_opt_in",
         on_change=_on_digest_pref_change,
-        help="Sends the top N names from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings.",
+        help="Emails the highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
     )
     st.sidebar.number_input(
-        "Picks per universe",
+        "Number of stocks per group/index",
         min_value=3,
         max_value=25,
         step=1,
@@ -1504,7 +1504,7 @@ def _run_streamlit_ui():
         if is_smtp_configured() and st.sidebar.button("Send preview to my email", use_container_width=True):
             from digest import send_email
             html = st.session_state["digest_preview"].get("html") or ""
-            status = send_email(user_email, "FunTech morning picks (preview)", html)
+            status = send_email(user_email, "FunTech daily morning scores (preview)", html)
             if status == "sent":
                 st.sidebar.success(f"Sent to {user_email}")
             else:
@@ -2055,7 +2055,7 @@ def _run_streamlit_ui():
             * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight** in the sidebar. The engine auto-calculates the remaining **Relative Strength Weight** so all three total 10.
             * **Customize Rules:** Click **Fundamental Rules**, **Technical Rules**, or **Relative Strength Rules** in the sidebar to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
-            * **Morning email:** Check **Email me weekday morning picks** in the sidebar. At 8:30 AM IST on weekdays the job emails (or writes) the top N names from each NSE universe. Click **Generate preview digest** to try it now.
+            * **Morning email:** Check **Email me weekday morning scores** in the sidebar. At 8:30 AM IST on weekdays the job emails (or writes) the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Generate preview digest** to try it now. This is a score ranking, not a stock pick.
             """
         )
         st.markdown("#### **4. Export to TradingView**")

@@ -11,7 +11,7 @@ This repo is the working copy of [vkiyer9691-spec/FunTech-Stock-Screener](https:
 - Upload a broker holdings file and score the portfolio
 - Sign in with Supabase for saved settings, watchlists, and scan history
 - Use **Bypass Login (Developer / Local Mode)** when Supabase is not configured
-- Opt in to a **weekday 8:30 AM IST email** of top-N picks from each NSE universe
+- Opt in to a **weekday 8:30 AM IST email** of daily morning scores for each NSE index/group
 
 ## Run locally
 
@@ -37,14 +37,14 @@ Without those values, login, saved settings, watchlist, and scan history stay lo
 
 Do not commit `secrets.toml`.
 
-## Morning email digest
+## Daily morning scores
 
 This was **not** in the Claude-generated GitHub snapshot. It is in this working copy:
 
-1. In the sidebar, check **Email me weekday morning picks** and set **Picks per universe**.
+1. In the sidebar, check **Email me weekday morning scores** and set **Number of stocks per group/index**.
 2. Rankings use **your** pillar weights and enabled rules (saved when you opt in or change settings).
 3. Click **Generate preview digest** (leave **Quick preview** on for a fast Nifty 50 + Next 50 sample).
-4. Each email ends with a disclaimer that this is not a stock recommendation.
+4. Each email ends with a disclaimer that this is a score ranking, not a stock pick or recommendation.
 5. The HTML is shown in the app and saved under `digest_outbox/`. SMTP is only needed for real inbox delivery.
 
 ```bash
@@ -54,7 +54,7 @@ python run_daily_digest.py --send
 
 GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**.
 
-To test delivery, use **Actions → Morning stock-pick digest → Run workflow** on branch `main` (do not click **Re-run** on an old run — that replays the old commit, including Node 20 actions). Leave **Quick preview** on, and optionally fill **Also send to this email**.
+To test delivery, use **Actions → Daily morning scores → Run workflow** on branch `main` (do not click **Re-run** on an old run — that replays the old commit). Leave **Quick preview** on, and optionally fill **Also send to this email**.
 
 Required for inbox delivery:
 
@@ -73,7 +73,7 @@ Local preferences are stored in `data/digest_prefs.json` as a fallback. Streamli
 | File | Role |
 | --- | --- |
 | `app.py` | Streamlit UI, scoring engine, NSE/Yahoo data fetchers |
-| `digest.py` / `run_daily_digest.py` | Morning top-N email / HTML digest |
+| `digest.py` / `run_daily_digest.py` | Weekday daily morning scores email / HTML |
 | `requirements.txt` | Python dependencies |
 | `.devcontainer/` | GitHub Codespaces / VS Code container (Streamlit on port 8501) |
 | `.streamlit/` | Server config and secrets example |

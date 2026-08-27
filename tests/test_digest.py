@@ -63,7 +63,7 @@ class DigestTests(unittest.TestCase):
         html = render_html(sections, datetime(2026, 8, 27, 8, 30, tzinfo=IST), 10)
         self.assertIn("Nifty 50", html)
         self.assertIn("RELIANCE.NS", html)
-        self.assertIn("FunTech morning picks", html)
+        self.assertIn("FunTech daily morning scores", html)
         self.assertIn("not a stock recommendation", html.lower())
         self.assertIn("consult your financial advisor", html.lower())
         self.assertIn("user-selected settings and weightages", html.lower())

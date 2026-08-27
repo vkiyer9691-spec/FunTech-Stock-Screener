@@ -1,4 +1,4 @@
-name: Morning stock-pick digest
+name: Daily morning scores
 
 # 08:30 Asia/Kolkata = 03:00 UTC. Indian cash market opens 09:15 IST.
 on:

@@ -1,4 +1,4 @@
-"""Morning email digest: top-N picks per NSE universe.
+"""Weekday email of daily morning scores per NSE index/group.
 
 Local preview writes HTML under digest_outbox/. Real SMTP send is optional
 and skipped when SMTP_* is not configured.
@@ -28,6 +28,7 @@ QUICK_UNIVERSES = ["Nifty 50", "Nifty Next 50"]
 DEFAULT_TOP_N = 10
 DEFAULT_WEIGHTS = (4, 4, 2)
 DEFAULT_FROM_NAME = "FunTech Screener"
+DIGEST_TITLE = "FunTech daily morning scores"
 # Reserved .invalid TLD — replies bounce instead of landing in SMTP_FROM.
 DEFAULT_REPLY_TO_ADDR = "noreply@funtech.invalid"
 
@@ -350,7 +351,7 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
                 )
         blocks.append(
             f"<h2>{sec['universe']}</h2>"
-            f"<p style='color:#555'>Universe size {sec['tickers_scanned']}. Showing top {top_n} by total score.</p>"
+            f"<p style='color:#555'>Index/group size {sec['tickers_scanned']}. Showing {top_n} stocks by total score.</p>"
             "<table cellpadding='8' cellspacing='0' border='1' style='border-collapse:collapse;width:100%;font-size:14px'>"
             "<thead><tr style='background:#111;color:#fff'>"
             "<th>#</th><th>Ticker</th><th>Total</th><th>Fund</th><th>Tech</th><th>RS</th><th>Sector</th>"
@@ -358,10 +359,10 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
             f"<tbody>{''.join(rows_html)}</tbody></table>"
         )
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>FunTech morning picks</title></head>
+<html><head><meta charset="utf-8"><title>{DIGEST_TITLE}</title></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#111">
-  <h1>FunTech morning picks</h1>
-  <p>Top {top_n} names in each NSE universe, scored with your current screener settings.</p>
+  <h1>{DIGEST_TITLE}</h1>
+  <p>Highest-scoring {top_n} stocks in each NSE index/group, scored with your current screener settings. This is a ranking of scores, not a stock pick or recommendation.</p>
   <p>{settings_line}</p>
   <p><strong>Generated:</strong> {when}</p>
   {''.join(blocks)}
@@ -463,7 +464,7 @@ def run_digest(
     all_tickers = list(dict.fromkeys(t for lst in universe_map.values() for t in lst))
     import app as screener
 
-    subject = f"FunTech morning picks — {generated_at.strftime('%d %b %Y')}"
+    subject = f"{DIGEST_TITLE} — {generated_at.strftime('%d %b %Y')}"
     deliveries = []
     extras = extra_recipients_from_env(extra_recipients)
     used_smtp_from_fallback = False

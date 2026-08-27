@@ -17,11 +17,11 @@ from digest import DEFAULT_TOP_N, run_digest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="FunTech morning stock-pick digest")
+    parser = argparse.ArgumentParser(description="FunTech daily morning scores")
     parser.add_argument("--preview", action="store_true", help="Write HTML to digest_outbox/ (default if --send is omitted)")
     parser.add_argument("--send", action="store_true", help="Email opted-in subscribers when SMTP is configured")
     parser.add_argument("--quick", action="store_true", help="Nifty 50 + Next 50 fallback lists only (fast local preview)")
-    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N, help="Picks per universe (default 10)")
+    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N, help="Number of stocks per group/index (default 10)")
     parser.add_argument("--to", action="append", default=[], help="Extra recipient (repeatable)")
     parser.add_argument("--force-weekend", action="store_true", help="Run even on Saturday/Sunday")
     args = parser.parse_args()
