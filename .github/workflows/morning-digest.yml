@@ -15,8 +15,8 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -39,7 +39,7 @@ jobs:
           python run_daily_digest.py --send --force-weekend $QUICK_FLAG
       - name: Upload HTML preview
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: morning-digest
           path: digest_outbox/
