@@ -372,13 +372,9 @@ Median technical score on that sample: **3.5 / 10**. ICICI 9, Titan/Adani Ent 8;
 - T1 and T3 both need close > 200-DMA; T3 also caps extension.
 - Unlike fundamentals, a NaN SMA/RSI **fails** the tick rather than skipping it.
 
-**Options**
+**Group 1 (T1, T3, T4) — locked: G1-keep.** Leave the three Stage 2 tests as written. They already split coiled (T1), not-extended (T3), and MAs still ticking up (T4).
 
-| ID | Choice |
-|---|---|
-| **T-keep** | Keep all ten tests as written. Rewrite help so users see the exact rules. **Recommended.** |
-| T-skip | Same tests, but missing indicator = skip (like C/A), not fail |
-| T2-tighten | Raise the bar on T2 (e.g. require near **both** MAs, or vol ≤ 3%) so it is not a free point |
+**Group 2 (T2) — open.** Tight coil: within 5% of 20- **or** 50-DMA, and 10-day vol ≤ 6%. Almost always passes on Nifty 50 (23/24). This is the old S tightness test.
 
 ---
 
@@ -401,6 +397,9 @@ Implemented in scoring + User Guide (except T1–T10, which are documented as-is
 - **M1** — Nifty > 200-DMA on every stock.
 - **Help/User Guide** — rewritten to match the rules above. T1–T10 described as currently coded.
 
+- **T Group 1 (T1/T3/T4)** — **G1-keep** (not a code change).
+
 ## Pending
 
-- **T1–T10** — full review later (T-keep for now).
+- **T Group 2 (T2)** — tightness; almost a free point on Nifty 50
+- **T Groups 3–4** — RSI then MACD
