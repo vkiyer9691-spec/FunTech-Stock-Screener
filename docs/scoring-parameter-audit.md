@@ -376,6 +376,8 @@ Median technical score on that sample: **3.5 / 10**. ICICI 9, Titan/Adani Ent 8;
 
 **Group 2 (T2) — locked: T2-keep.** Leave tightness as a calm-tape tick (near 20- or 50-DMA, 10-day vol ≤ 6%). Trend is already T1/T3/T4.
 
+**Group 3 (T5–T7) — locked: G3-keep.** RSI > 50 and rising on monthly, weekly, and daily.
+
 ---
 
 ## RS1 / RS2 — folded into L (L9a)
