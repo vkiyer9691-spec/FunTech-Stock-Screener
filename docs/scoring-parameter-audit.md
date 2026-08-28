@@ -401,8 +401,8 @@ Implemented in scoring + User Guide. T1–T10 reviewed in groups:
 
 - **T Group 1 (T1/T3/T4)** — **G1-keep** (not a code change).
 - **T Group 2 (T2)** — **T2-keep** (not a code change).
+- **T Group 3 (T5–T7)** — **G3-keep** (not a code change).
 
 ## Pending
 
-- **T Group 3 (T5–T7)** — RSI monthly / weekly / daily
 - **T Group 4 (T8–T10)** — MACD monthly / weekly / daily
