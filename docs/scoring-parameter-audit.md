@@ -266,22 +266,41 @@ Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not locked |
+| **Status** | Open — discussed; not locked |
 | Sidebar / UG | Institutional ownership > 30% |
 | Help | Data is often missing |
-| Classic I | Quality funds increasing positions; not just a static % |
-| **Code** | Yahoo `heldPercentInstitutions` > 0.30. Skip if missing. |
-| Notes | For many NSE names this field is empty or US-shareholder-oriented. Skipping missing data avoids a mass fail, but then I barely affects Nifty scores. |
+| **Code (I1)** | Yahoo `heldPercentInstitutions` > 0.30. Skip if missing. |
+
+**What O’Neil’s I actually is**
+
+I is **Institutional sponsorship**. He wanted **some** quality funds involved, and preferably **adding**, not a stock nobody will buy. He also warned that **too many** institutions can mean the name is already crowded. The live tell is **rising sponsor count / rising holdings**, not a one-shot percentage. We do **not** get quarter-on-quarter fund counts from Yahoo (`institutionCount` was empty on every sample name).
+
+**What the code does**
+
+A static cut: institutions hold more than **30% of shares outstanding**. That is a crude “is it owned by funds?” check. It is **not** quality of holders and **not** accumulation.
+
+The help text is outdated: on this Nifty 50 sample the field was **present for 24/25** (only Tata Motors skip, Yahoo 404). It **does** split the universe, 12 pass / 12 fail.
+
+**The India catch (why it is not straightforward)**
+
+Yahoo’s % is of **the whole company**, not of free float. Promoter-heavy names look “under-sponsored” even when FIIs/DIIs own most of the float:
+
+- **Fail I at 30%:** TCS 18% inst / 72% insider, Reliance 28/52, HUL 21/62, Maruti 26/62, Titan 22/59, Bajaj Finance 27/57, Adani Ent 18/75, …
+- **Pass:** professionally owned banks and similar — Axis 71%, HDFC Bank 61%, ICICI 59%, Infosys 52%, L&T 53%, …
+
+So I today is closer to “**not promoter-dominated**” than to “has institutional sponsorship.” Almost everyone has *some* institutions (all 24 are >5%).
 
 **Options**
 
 | ID | Rule |
 |---|---|
-| I1 | Keep > 30% when Yahoo has it; skip when missing |
-| I2 | Keep but treat missing as fail |
-| I3 | Drop I until we have an NSE holdings source |
+| **I1** | Keep > 30% of outstanding; skip if missing. Simple; tilts against promoter-led names |
+| I2 | Same 30%, missing = fail (punishes Yahoo holes) |
+| **I3** | Drop I until we have NSE shareholding (promoter / FII / DII) |
+| I4 | Pass if institutions > **10%** (has some sponsorship; almost all Nifty pass) |
+| I5 | Pass if institutions > 30% **of float** (needs float + outstanding; definitions often disagree) |
 
-**Recommended:** I1 until a better India source exists.
+**Recommended:** **I1** if you want a filter that actually says yes/no and you accept it favours widely held / bank-like cap tables. **I3** if you do not want to fail TCS/Reliance/HUL for being promoter-led. I would not use I2. I4 makes I almost always pass, so it is clutter. We cannot do O’Neil’s “funds are adding” without another data source.
 
 ---
 
@@ -349,5 +368,5 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 
 ## Pending your reply
 
-- **I, M** — pick IDs or “keep”
+- **I** — I1 / I3 (recommended fork); I2 / I4 / I5 also listed
 - Then **T1–T10** (same file, still one implementation drop)
