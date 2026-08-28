@@ -1,13 +1,10 @@
 name: Daily morning scores
 
-# 08:30 Asia/Kolkata = 03:00 UTC. Indian cash market opens 09:15 IST.
-# GitHub never queued the 03:00 UTC schedule on 28 Aug 2026 (no `schedule`
-# runs exist — only manual workflow_dispatch). Extra cron below is 09:20 IST
-# on 28 Aug so today's mail can still go out.
+# Worker only. GitHub's own `schedule:` cron is best-effort and missed 08:30 IST
+# on 28 Aug 2026. The clock is Supabase pg_cron (see
+# supabase_schedule_morning_scores.sql) which POSTs workflow_dispatch.
+# A push to cursor/run-morning-scores-4003 also starts a send (used for tests).
 on:
-  schedule:
-    - cron: "0 3 * * 1-5"
-    - cron: "50 3 28 8 *"
   workflow_dispatch:
     inputs:
       quick:
@@ -18,6 +15,15 @@ on:
         description: "Also send to this email (even if nobody is opted in on Streamlit Cloud)"
         type: string
         required: false
+  repository_dispatch:
+    types: [morning-digest]
+  push:
+    branches:
+      - cursor/run-morning-scores-4003
+
+concurrency:
+  group: daily-morning-scores
+  cancel-in-progress: false
 
 jobs:
   digest:
@@ -44,7 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           ARGS=(--send --force-weekend)
-          if [ "${{ github.event.inputs.quick }}" = "true" ]; then
+          # Manual Run workflow may pass quick=true. Push/test branch is a
+          # fast Nifty 50 + Next 50 send. Weekday pg_cron uses workflow_dispatch
+          # with no inputs, so this stays a full scan.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event.inputs.quick }}" = "true" ]; then
             ARGS+=(--quick)
           fi
           if [ -n "${{ github.event.inputs.to }}" ]; then

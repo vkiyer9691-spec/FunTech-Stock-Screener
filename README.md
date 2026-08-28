@@ -52,9 +52,13 @@ python run_daily_digest.py --preview --quick
 python run_daily_digest.py --send
 ```
 
-GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**. GitHub only queues that timer after it has indexed the workflow; a missed morning can be retried with **Run workflow**. A one-off cron at **03:50 UTC on 28 Aug (9:20 AM IST)** is included so 28 Aug 2026 can still send after the 8:30 slot was skipped.
+GitHub Actions is the **worker** (score + SMTP). It is **not** the clock — GitHub’s own `schedule:` cron is best-effort and skipped 8:30 AM IST on 28 Aug 2026.
 
-To test delivery, use **Actions → Daily morning scores → Run workflow** on branch `main` (do not click **Re-run** on an old run — that replays the old commit). Leave **Quick preview** on, and optionally fill **Also send to this email**.
+The clock is **Supabase pg_cron** (`supabase_schedule_morning_scores.sql`): **03:00 UTC (8:30 AM IST) Monday–Friday**, which POSTs `workflow_dispatch` to this repo. You must store a GitHub PAT named `github_workflow_pat` in Supabase Vault (Actions: Read and write on this repo), then run that SQL once.
+
+A push to branch `cursor/run-morning-scores-4003` also starts a **quick** send (used to prove the worker). Manual **Run workflow** still works.
+
+To test delivery, use **Actions → Daily morning scores → Run workflow** on branch `main`, or push the trigger branch.
 
 Required for inbox delivery:
 
