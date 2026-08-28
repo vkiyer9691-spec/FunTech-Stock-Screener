@@ -32,10 +32,10 @@ class DigestTests(unittest.TestCase):
 
     def test_rank_top_n_per_universe(self):
         df = pd.DataFrame([
-            {"Ticker": "AAA.NS", "Total Score": 9.1, "Fundamental Score": 8, "Technical Score": 9, "Relative Strength Score": 7, "Sector": "Tech"},
-            {"Ticker": "BBB.NS", "Total Score": 8.2, "Fundamental Score": 7, "Technical Score": 8, "Relative Strength Score": 6, "Sector": "Banks"},
-            {"Ticker": "CCC.NS", "Total Score": 7.0, "Fundamental Score": 6, "Technical Score": 7, "Relative Strength Score": 5, "Sector": "Auto"},
-            {"Ticker": "DDD.NS", "Total Score": 9.9, "Fundamental Score": 9, "Technical Score": 9, "Relative Strength Score": 9, "Sector": "IT"},
+            {"Ticker": "AAA.NS", "Total Score": 9.1, "Fundamental Score": 8, "Technical Score": 9, "Sector": "Tech"},
+            {"Ticker": "BBB.NS", "Total Score": 8.2, "Fundamental Score": 7, "Technical Score": 8, "Sector": "Banks"},
+            {"Ticker": "CCC.NS", "Total Score": 7.0, "Fundamental Score": 6, "Technical Score": 7, "Sector": "Auto"},
+            {"Ticker": "DDD.NS", "Total Score": 9.9, "Fundamental Score": 9, "Technical Score": 9, "Sector": "IT"},
         ])
         universe_map = {
             "Nifty 50": ["AAA.NS", "BBB.NS", "CCC.NS"],
@@ -56,7 +56,6 @@ class DigestTests(unittest.TestCase):
                 "Total Score": 8.5,
                 "Fundamental Score": 7.1,
                 "Technical Score": 8.0,
-                "Relative Strength Score": 6.2,
                 "Sector": "Energy",
             }],
         }]
@@ -82,23 +81,23 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(sub["email"], "trader@example.com")
         self.assertEqual(sub["top_n"], 10)
         self.assertEqual(sub["w_fund"], 5)
-        self.assertEqual(sub["w_rs"], 2)
+        self.assertEqual(sub["w_tech"], 3)
+        self.assertNotIn("w_rs", sub)
         self.assertIsNone(subscriber_from_settings_row({**row, "digest_opt_in": False}, "trader@example.com"))
 
         stale = subscriber_from_settings_row(
             {**row, "w_fund": 1, "w_tech": 9, "w_rs": 2},
             "trader@example.com",
         )
-        self.assertEqual(stale["w_rs"], 0)
-        self.assertEqual(stale["w_fund"] + stale["w_tech"] + stale["w_rs"], 10)
+        self.assertEqual(stale["w_fund"] + stale["w_tech"], 10)
 
-    def test_stale_rs_weight_cannot_push_total_over_ten(self):
-        self.assertEqual(clamp_pillar_weights(1, 9, 2), (1, 9, 0))
-        total = round(weighted_total(5.71, 10.0, 10.0, *clamp_pillar_weights(1, 9, 2)), 2)
+    def test_two_pillar_total_ignores_legacy_rs_weight(self):
+        self.assertEqual(clamp_pillar_weights(1, 9, 2), (1, 9))
+        total = round(weighted_total(5.71, 10.0, *clamp_pillar_weights(1, 9, 2)), 2)
         self.assertEqual(total, 9.57)
         self.assertLessEqual(total, 10)
         over = normalize_settings({"w_fund": 1, "w_tech": 9, "w_rs": 2})
-        self.assertEqual(over["w_rs"], 0)
+        self.assertNotIn("w_rs", over)
         html = render_html(
             [{
                 "universe": "Nifty 50",
@@ -108,7 +107,6 @@ class DigestTests(unittest.TestCase):
                     "Total Score": total,
                     "Fundamental Score": 5.71,
                     "Technical Score": 10.0,
-                    "Relative Strength Score": 10.0,
                     "Sector": "Fin Services",
                 }],
             }],
@@ -116,7 +114,8 @@ class DigestTests(unittest.TestCase):
             10,
             over,
         )
-        self.assertIn("Fundamental 1 / Technical 9 / Relative Strength 0 (sum 10)", html)
+        self.assertIn("Fundamental 1 / Technical 9", html)
+        self.assertNotIn("Relative Strength", html)
 
     def test_extract_email_and_digest_to(self):
         self.assertEqual(extract_email_address("FunTech <you@gmail.com>"), "you@gmail.com")

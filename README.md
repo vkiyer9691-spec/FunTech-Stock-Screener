@@ -1,13 +1,13 @@
 # FunTech Stock Screener
 
-NSE stock screener for Indian equities. It scores tickers on customizable **fundamental**, **technical**, and **relative-strength** rules, evaluates broker holding files, and can export a TradingView watchlist.
+NSE stock screener for Indian equities. It scores tickers on customizable **CANSLIM fundamental** and **technical** rules, evaluates broker holding files, and can export a TradingView watchlist.
 
 This repo is the working copy of [vkiyer9691-spec/FunTech-Stock-Screener](https://github.com/vkiyer9691-spec/FunTech-Stock-Screener), imported so we can maintain and change it from Cursor Cloud Agents.
 
 ## What you can do
 
 - Screen Nifty 50 / Next 50 / Midcap / Smallcap / 500 / F&O universes
-- Toggle CANSLIM-style fundamental filters and a 10-point technical system
+- Toggle CANSLIM-style fundamental filters (including vs Nifty / vs sector leadership) and a 10-point technical system
 - Upload a broker holdings file and score the portfolio
 - Sign in with Supabase for saved settings, watchlists, and scan history
 - Use **Bypass Login (Developer / Local Mode)** when Supabase is not configured

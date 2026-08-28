@@ -117,13 +117,14 @@ def _apply_page_chrome():
 # ----------------------------------------------------------------------------------
 BENCHMARK = "^NSEI"
 DEFAULT_FUND_PARAMS = {
-    "C": "C: Current quarterly EPS vs same quarter last year > 15%",
-    "A": "A: Annual Revenue Growth > 10%",
-    "N": "N: Near 52-Week High (within 25%)",
-    "S": "S: Supply/Demand (Tight Base Consolidation)",
-    "L": "L: Leader Relative Strength (Daily RSI > 55)",
-    "I": "I: Institutional Ownership > 30%",
-    "M": "M: Market Direction (Nifty > 200 DMA)",
+    "C": "C: Quarterly EPS vs same quarter last year > 15%",
+    "A": "A: Quarterly Total Revenue vs same quarter last year > 10%",
+    "N": "N: Within 10% of 52-week high",
+    "S": "S: Demand — more volume on up days than down days (20 sessions)",
+    "L": "L: 63-day return beats Nifty 50",
+    "Ls": "Ls: 63-day return beats sector peers in this scan",
+    "I": "I: Institutional ownership > 30%",
+    "M": "M: Nifty 50 above its 200-DMA",
 }
 DEFAULT_TECH_PARAMS = {
     "T1": "T1: Close > 200 DMA and near 50 DMA (within 5%)",
@@ -137,18 +138,15 @@ DEFAULT_TECH_PARAMS = {
     "T9": "T9: Weekly MACD Positive Crossover & Rising",
     "T10": "T10: Daily MACD Line Rising",
 }
-DEFAULT_RS_PARAMS = {
-    "RS1": "RS1: Broad Market RS vs Nifty 50 (^NSEI)",
-    "RS2": "RS2: Sector Peer Relative Strength",
-}
 FUND_HELP = {
     "C": "On: latest-quarter diluted EPS (else net income) must be more than 15% above the same quarter last year. Yahoo’s annual growth rate is not used. Off: this rule is ignored.",
-    "A": "On: annual revenue growth must be above 10%. Off: sales growth is not part of the fundamental score.",
-    "N": "On: price must sit within 25% of the 52-week high. Off: proximity to highs is ignored.",
-    "S": "On: recent price action must look like a tight base (low volatility near the 50-DMA). Off: base tightness is ignored.",
-    "L": "On: daily RSI must be above 55 so the name is acting like a leader. Off: RSI leadership is ignored.",
-    "I": "On: reported institutional ownership must be above 30%. Off: ownership is ignored (data is often missing).",
-    "M": "On: Nifty 50 must be above its 200-day average for this point. Off: market direction is ignored.",
+    "A": "On: latest-quarter Total Revenue must be more than 10% above the same quarter last year. Yahoo’s annual sales growth is not used. Off: this rule is ignored.",
+    "N": "On: last price must sit within 10% of the 52-week high (the high is the better of Yahoo’s figure and the last 252 daily highs). Off: proximity to highs is ignored.",
+    "S": "On: over the last 20 sessions, volume on up-close days must exceed volume on down-close days. Tight bases are scored in T1/T2, not here. Off: this rule is ignored.",
+    "L": "On: the stock’s ~3-month (63-day) return must beat Nifty 50. Off: vs-Nifty leadership is ignored.",
+    "Ls": "On: the same 63-day return must beat the average of same-sector names in this scan. Skipped when sector is unknown. Off: vs-sector leadership is ignored.",
+    "I": "On: Yahoo institutional ownership must be above 30% of shares outstanding (promoter-heavy names often fail). Off: ownership is ignored.",
+    "M": "On: Nifty 50 must be above its 200-day average. Every stock in the scan gets the same result. Off: market direction is ignored.",
 }
 TECH_HELP = {
     "T1": "On: close must be above the 200-DMA and within 5% of the 50-DMA. Off: this trend/mean-reversion check is skipped.",
@@ -161,10 +159,6 @@ TECH_HELP = {
     "T8": "On: monthly MACD line must be rising. Off: monthly MACD is ignored.",
     "T9": "On: weekly MACD must have a positive crossover and a rising line. Off: weekly MACD is ignored.",
     "T10": "On: daily MACD line must be rising. Off: daily MACD is ignored.",
-}
-RS_HELP = {
-    "RS1": "On: 3-month return is compared with Nifty 50. Off: broad-market relative strength is dropped from the RS score.",
-    "RS2": "On: 3-month return is compared with same-sector peers in this scan. Off: sector relative strength is dropped.",
 }
 SECTOR_MAP = {
     "Financial Services": "Fin Services", "Consumer Cyclical": "Cons Cyclical",
@@ -391,9 +385,6 @@ def init_session_defaults():
     for k in DEFAULT_TECH_PARAMS:
         if f"tech_{k}" not in st.session_state:
             st.session_state[f"tech_{k}"] = True
-    for k in DEFAULT_RS_PARAMS:
-        if f"rs_{k}" not in st.session_state:
-            st.session_state[f"rs_{k}"] = True
     if "digest_opt_in" not in st.session_state:
         st.session_state["digest_opt_in"] = False
     if "digest_top_n" not in st.session_state:
@@ -421,9 +412,6 @@ def load_user_settings_from_db(user_id: str):
             tech_rules = data.get("tech_rules") or {}
             for k in DEFAULT_TECH_PARAMS:
                 st.session_state[f"tech_{k}"] = bool(tech_rules.get(k, True))
-            rs_rules = data.get("rs_rules") or {}
-            for k in DEFAULT_RS_PARAMS:
-                st.session_state[f"rs_{k}"] = bool(rs_rules.get(k, True))
             if "digest_opt_in" in data:
                 st.session_state["digest_opt_in"] = bool(data.get("digest_opt_in"))
             if data.get("digest_top_n"):
@@ -445,14 +433,12 @@ def save_user_settings_to_db():
         return
     fund_dict = {k: st.session_state.get(f"fund_{k}", True) for k in DEFAULT_FUND_PARAMS}
     tech_dict = {k: st.session_state.get(f"tech_{k}", True) for k in DEFAULT_TECH_PARAMS}
-    rs_dict = {k: st.session_state.get(f"rs_{k}", True) for k in DEFAULT_RS_PARAMS}
     payload = {
         "user_id": user_id,
         "w_fund": st.session_state.get("w_fund", 4),
         "w_tech": st.session_state.get("w_tech", 4),
         "fund_rules": fund_dict,
         "tech_rules": tech_dict,
-        "rs_rules": rs_dict,
         "digest_opt_in": bool(st.session_state.get("digest_opt_in", False)),
         "digest_top_n": int(st.session_state.get("digest_top_n", 10)),
         "updated_at": "now()"
@@ -500,7 +486,7 @@ def save_scan_history(results_df: pd.DataFrame):
             "total_score": float(r["Total Score"]),
             "fundamental_score": float(r["Fundamental Score"]),
             "technical_score": float(r["Technical Score"]),
-            "rs_score": float(r["Relative Strength Score"]),
+            "rs_score": 0.0,
             "sector": r.get("Sector"),
         })
     try:
@@ -672,11 +658,10 @@ def render_login_screen():
         st.markdown(
             """
             ### 🏛️ What's Inside:
-            * **CANSLIM-7 Fundamental Engine:** Quantitative growth scoring.
-            * **10-Point Technical System:** Multi-timeframe trend & momentum.
-            * **Relative Strength Matrix:** Sector & Nifty 50 outperformance filters.
-            * **Multi-Broker Portfolio Evaluator:** Auto-parse holdings.
-            * **1-Click TradingView Exporter:** Instant watchlist sync.
+            * **CANSLIM fundamental engine:** earnings, sales, highs, demand, leadership vs Nifty/sector, institutions, market.
+            * **10-point technical system:** multi-timeframe trend and momentum.
+            * **Multi-broker portfolio evaluator:** auto-parse holdings.
+            * **1-click TradingView exporter:** instant watchlist strings.
             """
         )
     return False
@@ -951,19 +936,10 @@ def fetch_info(ticker: str) -> dict:
                 q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
                 ["net income"],
             )
-            if q_fin is not None and not q_fin.empty:
-                rev_row = next((r for r in q_fin.index if "total revenue" in str(r).lower() or "revenue" in str(r).lower()), None)
-                ni_row = next((r for r in q_fin.index if "net income" in str(r).lower()), None)
-                if rev_row and len(q_fin.columns) >= 5:
-                    cur_rev = q_fin.loc[rev_row].iloc[0]
-                    yoy_rev = q_fin.loc[rev_row].iloc[4]
-                    if yoy_rev and yoy_rev > 0:
-                        default_info["revenueGrowth"] = (cur_rev - yoy_rev) / yoy_rev
-                if ni_row and len(q_fin.columns) >= 5:
-                    cur_ni = q_fin.loc[ni_row].iloc[0]
-                    yoy_ni = q_fin.loc[ni_row].iloc[4]
-                    if yoy_ni and yoy_ni > 0:
-                        default_info["earningsQuarterlyGrowth"] = (cur_ni - yoy_ni) / yoy_ni
+            default_info["quarterly_rev_yoy"] = _yoy_latest_vs_year_ago(
+                q_fin if q_fin is not None and not getattr(q_fin, "empty", True) else None,
+                ["total revenue", "operating revenue", "revenue"],
+            )
         except Exception:
             pass
         try:
@@ -990,7 +966,7 @@ def fetch_info(ticker: str) -> dict:
 @st.dialog("⚙️ Customize Fundamental Parameters")
 
 def customize_fundamental_modal():
-    st.write("Select CANSLIM-7 criteria to include:")
+    st.write("Select CANSLIM criteria to include:")
     for k, label in DEFAULT_FUND_PARAMS.items():
         st.session_state[f"fund_{k}"] = st.checkbox(
             label, value=st.session_state.get(f"fund_{k}", True), help=FUND_HELP.get(k, "")
@@ -1023,24 +999,6 @@ def customize_technical_modal():
     if col2.button("Apply & Save", key="apply_tech", help="Store these toggles for scans and the weekday morning scores email."):
         save_user_settings_to_db()
         st.rerun()
-@st.dialog("⚙️ Customize Relative Strength Parameters")
-
-def customize_rs_modal():
-    st.write("Select relative strength benchmarks to include:")
-    for k, label in DEFAULT_RS_PARAMS.items():
-        st.session_state[f"rs_{k}"] = st.checkbox(
-            label, value=st.session_state.get(f"rs_{k}", True), help=RS_HELP.get(k, "")
-        )
-    
-    col1, col2 = st.columns([1, 1])
-    if col1.button("Restore Defaults", key="reset_rs", help="Turn both relative-strength benchmarks back on and save."):
-        for k in DEFAULT_RS_PARAMS:
-            st.session_state[f"rs_{k}"] = True
-        save_user_settings_to_db()
-        st.rerun()
-    if col2.button("Apply & Save", key="apply_rs", help="Store these toggles for scans and the weekday morning scores email."):
-        save_user_settings_to_db()
-        st.rerun()
 
 @st.dialog("FunTech daily morning scores", width="large")
 def show_digest_preview_modal(preview: dict):
@@ -1060,10 +1018,9 @@ def show_pillar_details_modal(row_data):
     st.subheader(f"Symbol: {ticker.replace('.NS', '')}")
     st.caption(f"Sector: {row_data['Sector']} | Overall Score: {row_data['Total Score']:.2f} / 10")
     
-    tab_f, tab_t, tab_rs = st.tabs([
-        "🏛️ Fundamental (CANSLIM)", 
-        "📈 Technical Momentum", 
-        "⚡ Relative Strength"
+    tab_f, tab_t = st.tabs([
+        "🏛️ Fundamental (CANSLIM)",
+        "📈 Technical Momentum",
     ])
     
     with tab_f:
@@ -1071,10 +1028,21 @@ def show_pillar_details_modal(row_data):
         raw_fund = row_data.get("raw_fund", {})
         fund_items = []
         for k, label in DEFAULT_FUND_PARAMS.items():
-            status = "✅ Pass" if raw_fund.get(k, False) else "❌ Fail"
+            val = raw_fund.get(k, False)
+            if val is None:
+                status = "⏭ Skip"
+            elif val:
+                status = "✅ Pass"
+            else:
+                status = "❌ Fail"
             active = "Active" if st.session_state.get(f"fund_{k}", True) else "Disabled"
             fund_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
         st.dataframe(pd.DataFrame(fund_items), use_container_width=True, hide_index=True)
+        l_diff = raw_fund.get("L_diff")
+        ls_diff = raw_fund.get("Ls_diff")
+        c_l1, c_l2 = st.columns(2)
+        c_l1.metric("63-day return vs Nifty 50", f"{l_diff:+.1f}%" if l_diff is not None else "N/A")
+        c_l2.metric("63-day return vs sector peers", f"{ls_diff:+.1f}%" if ls_diff is not None else "N/A")
     with tab_t:
         st.markdown(f"**Technical Score:** `{row_data['Technical Score']:.2f} / 10` (Passed: {row_data['Tech Passed']})")
         raw_tech = row_data.get("raw_tech", {})
@@ -1084,24 +1052,6 @@ def show_pillar_details_modal(row_data):
             active = "Active" if st.session_state.get(f"tech_{k}", True) else "Disabled"
             tech_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
         st.dataframe(pd.DataFrame(tech_items), use_container_width=True, hide_index=True)
-    with tab_rs:
-        st.markdown(f"**Relative Strength Score:** `{row_data['Relative Strength Score']:.2f} / 10`")
-        raw_rs = row_data.get("raw_rs", {})
-        c_rs1, c_rs2 = st.columns(2)
-        rs1_diff = raw_rs.get('RS1_diff')
-        rs1_score = raw_rs.get('RS1_score')
-        c_rs1.metric(
-            "RS vs Benchmark (Nifty 50)",
-            f"{rs1_diff:+.2f}%" if rs1_diff is not None else "N/A",
-            delta=f"{rs1_score:.2f}/5 pts" if rs1_score is not None else None,
-        )
-        rs2_diff = raw_rs.get('RS2_diff')
-        rs2_score = raw_rs.get('RS2_score')
-        c_rs2.metric(
-            "RS vs Sector Average",
-            f"{rs2_diff:+.2f}%" if rs2_diff is not None else "N/A (no sector data)",
-            delta=f"{rs2_score:.2f}/5 pts" if rs2_score is not None else None,
-        )
     if SUPABASE_AVAILABLE:
         st.divider()
         st.markdown("**📈 Score History**")
@@ -1111,7 +1061,7 @@ def show_pillar_details_modal(row_data):
         if history_df.empty:
             st.caption("No history yet for this ticker — it'll build up as you run scans over time.")
         else:
-            st.line_chart(history_df.set_index("scan_time")[["total_score", "fundamental_score", "technical_score", "rs_score"]])
+            st.line_chart(history_df.set_index("scan_time")[["total_score", "fundamental_score", "technical_score"]])
     st.divider()
     if st.button(
         "❌ Close Breakdown",
@@ -1147,8 +1097,7 @@ def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     Wilder's RSI, matching the convention pandas_ta previously used.
     Self-contained (no pandas_ta dependency) — pandas_ta is a largely unmaintained
     library that was found to silently return None/empty results under pandas 3.0,
-    which made every RSI/MACD-based technical rule (T5-T10) and the CANSLIM "L"
-    fundamental rule always evaluate False without raising any visible error.
+    which made every RSI/MACD-based technical rule (T5-T10) always evaluate False without raising any visible error.
     """
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -1212,6 +1161,72 @@ def canslim_c_growth(info: dict) -> float | None:
     return None
 
 
+def canslim_a_growth(info: dict) -> float | None:
+    """A2: quarterly Total Revenue YoY. Ignore Yahoo revenueGrowth."""
+    val = info.get("quarterly_rev_yoy")
+    if val is not None and pd.notna(val):
+        return float(val)
+    return None
+
+
+def period_return_pct(close: pd.Series | None, lookback: int = 63) -> float | None:
+    if close is None:
+        return None
+    s = close.dropna()
+    if len(s) < 22:
+        return None
+    n = min(lookback, len(s) - 1)
+    prev, last = s.iloc[-n], s.iloc[-1]
+    if prev in (0, None) or pd.isna(prev) or pd.isna(last):
+        return None
+    try:
+        return float(last / float(prev) - 1.0) * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def fifty_two_week_high(info: dict, daily: pd.DataFrame | None) -> float | None:
+    """N4: max of Yahoo 52-week high (if present) and last ~252 daily highs."""
+    highs: list[float] = []
+    y = info.get("fiftyTwoWeekHigh") if info else None
+    if y is not None and pd.notna(y):
+        try:
+            yf = float(y)
+            if yf > 0:
+                highs.append(yf)
+        except (TypeError, ValueError):
+            pass
+    if daily is not None and not daily.empty:
+        col = daily["High"] if "High" in daily.columns else daily["Close"]
+        window = col.tail(252).dropna()
+        if not window.empty:
+            highs.append(float(window.max()))
+    return max(highs) if highs else None
+
+
+def up_volume_exceeds_down(daily: pd.DataFrame | None, sessions: int = 20) -> bool | None:
+    """S3: last `sessions` bars, volume on up-close days vs down-close days."""
+    if daily is None or daily.empty or "Volume" not in daily.columns or "Close" not in daily.columns:
+        return None
+    if len(daily) < sessions + 1:
+        return None
+    d = daily.tail(sessions + 1)
+    chg = d["Close"].diff().iloc[1:]
+    vol = d["Volume"].iloc[1:]
+    if vol.isna().all():
+        return None
+    up = float(vol.loc[chg > 0].sum())
+    down = float(vol.loc[chg < 0].sum())
+    if up == 0 and down == 0:
+        return None
+    return bool(up > down)
+
+
+def _set_fund_rule(raw: dict, valid: dict, key: str, passed: bool | None) -> None:
+    raw[key] = passed
+    valid[key] = passed is not None
+
+
 def slope_up(series: pd.Series, lookback: int = 5) -> bool:
     s = series.dropna()
     return len(s) >= lookback + 1 and bool(s.iloc[-1] > s.iloc[-(lookback + 1)])
@@ -1220,89 +1235,77 @@ def is_rising(series: pd.Series, lookback: int = 2) -> bool:
     s = series.dropna()
     return len(s) >= lookback + 1 and bool(s.iloc[-1] > s.iloc[-(lookback + 1)])
 
-def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.DataFrame):
+def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.DataFrame, sector_avg_ret=None):
     raw_results = {}
     valid_metrics = {}
+    info = info or {}
     eps_growth = canslim_c_growth(info)
     if eps_growth is not None and pd.notna(eps_growth):
-        raw_results["C"] = bool(eps_growth > 0.15)
-        valid_metrics["C"] = True
+        _set_fund_rule(raw_results, valid_metrics, "C", bool(eps_growth > 0.15))
     else:
-        raw_results["C"] = False
-        valid_metrics["C"] = False
-    rev_growth = info.get("revenueGrowth")
+        _set_fund_rule(raw_results, valid_metrics, "C", None)
+    rev_growth = canslim_a_growth(info)
     if rev_growth is not None and pd.notna(rev_growth):
-        raw_results["A"] = bool(rev_growth > 0.10)
-        valid_metrics["A"] = True
+        _set_fund_rule(raw_results, valid_metrics, "A", bool(rev_growth > 0.10))
     else:
-        raw_results["A"] = False
-        valid_metrics["A"] = False
-    fifty2_high = info.get("fiftyTwoWeekHigh")
+        _set_fund_rule(raw_results, valid_metrics, "A", None)
+
+    fifty2_high = fifty_two_week_high(info, daily)
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
     if not current_price and daily is not None and not daily.empty:
         current_price = daily["Close"].iloc[-1]
-    # Fix: N/S/L/M used to always count in the denominator even when there wasn't
-    # enough data to actually evaluate them (e.g. a recently-listed stock without
-    # 50 days of history for "S") — silently scoring "insufficient data" as a FAIL.
-    # That was inconsistent with C/A/I above, which correctly exclude themselves
-    # from the score when data is missing rather than penalizing the stock for it.
-    # N/S/L/M now follow the same "exclude when unknown" policy.
-    if fifty2_high and current_price:
-        raw_results["N"] = bool(current_price >= 0.75 * fifty2_high)
-        valid_metrics["N"] = True
+    if fifty2_high and current_price and float(fifty2_high) > 0:
+        _set_fund_rule(raw_results, valid_metrics, "N", bool(float(current_price) >= 0.90 * float(fifty2_high)))
     else:
-        raw_results["N"] = False
-        valid_metrics["N"] = False
-    if daily is not None and len(daily) >= 50:
-        close = daily["Close"]
-        sma50 = close.rolling(50).mean().iloc[-1]
-        vol_std = close.tail(10).std() / close.tail(10).mean() * 100
-        near_50 = abs(close.iloc[-1] - sma50) / sma50 * 100 if pd.notna(sma50) else 99
-        raw_results["S"] = bool(near_50 <= 5 and vol_std <= 6)
-        valid_metrics["S"] = True
+        _set_fund_rule(raw_results, valid_metrics, "N", None)
+
+    _set_fund_rule(raw_results, valid_metrics, "S", up_volume_exceeds_down(daily, 20))
+
+    stock_ret = period_return_pct(daily["Close"] if daily is not None and not daily.empty else None, 63)
+    bench_ret = period_return_pct(bench_daily["Close"] if bench_daily is not None and not bench_daily.empty else None, 63)
+    if stock_ret is not None and bench_ret is not None:
+        raw_results["L_diff"] = round(stock_ret - bench_ret, 2)
+        _set_fund_rule(raw_results, valid_metrics, "L", bool(stock_ret > bench_ret))
     else:
-        raw_results["S"] = False
-        valid_metrics["S"] = False
-    if daily is not None and len(daily) >= 14:
-        rsi = compute_rsi(daily["Close"], 14)
-        if rsi is not None and not rsi.empty and pd.notna(rsi.iloc[-1]):
-            raw_results["L"] = bool(rsi.iloc[-1] > 55)
-            valid_metrics["L"] = True
-        else:
-            raw_results["L"] = False
-            valid_metrics["L"] = False
+        raw_results["L_diff"] = None
+        _set_fund_rule(raw_results, valid_metrics, "L", None)
+
+    sector_available = sector_avg_ret is not None and pd.notna(sector_avg_ret)
+    if stock_ret is not None and sector_available:
+        raw_results["Ls_diff"] = round(stock_ret - float(sector_avg_ret), 2)
+        _set_fund_rule(raw_results, valid_metrics, "Ls", bool(stock_ret > float(sector_avg_ret)))
     else:
-        raw_results["L"] = False
-        valid_metrics["L"] = False
+        raw_results["Ls_diff"] = None
+        _set_fund_rule(raw_results, valid_metrics, "Ls", None)
+
     inst_hold = info.get("heldPercentInstitutions")
     if inst_hold is not None and pd.notna(inst_hold):
-        raw_results["I"] = bool(inst_hold > 0.30)
-        valid_metrics["I"] = True
+        _set_fund_rule(raw_results, valid_metrics, "I", bool(inst_hold > 0.30))
     else:
-        raw_results["I"] = False
-        valid_metrics["I"] = False
+        _set_fund_rule(raw_results, valid_metrics, "I", None)
+
     if bench_daily is not None and len(bench_daily) >= 200:
         bench_close = bench_daily["Close"]
         bench_sma200 = bench_close.rolling(200).mean().iloc[-1]
-        raw_results["M"] = bool(bench_close.iloc[-1] > bench_sma200)
-        valid_metrics["M"] = True
+        if pd.notna(bench_sma200):
+            _set_fund_rule(raw_results, valid_metrics, "M", bool(bench_close.iloc[-1] > bench_sma200))
+        else:
+            _set_fund_rule(raw_results, valid_metrics, "M", None)
     else:
-        raw_results["M"] = False
-        valid_metrics["M"] = False
+        _set_fund_rule(raw_results, valid_metrics, "M", None)
+
     active_passed = 0
     active_total = 0
     passed_labels = []
     for k in DEFAULT_FUND_PARAMS:
         if _ss_get(f"fund_{k}", True):
-            if valid_metrics.get(k, True):
+            if valid_metrics.get(k, False):
                 active_total += 1
-                if raw_results.get(k, False):
+                if raw_results.get(k) is True:
                     active_passed += 1
                     passed_labels.append(k)
     norm_score = (active_passed / active_total * 10) if active_total > 0 else 0.0
     if active_total == 0:
-        # Distinguish "no data available at all" from "evaluated everything and
-        # nothing passed" — both used to display identically as score 0 / "None".
         status_str = "No Data Available"
     else:
         status_str = ",".join(passed_labels) if passed_labels else "None"
@@ -1357,50 +1360,14 @@ def compute_technical_score(daily: pd.DataFrame):
     status_str = f"{active_passed}/{active_total}"
     return round(norm_score, 2), status_str, raw
 
-def compute_relative_strength_score(daily: pd.DataFrame, bench_daily: pd.DataFrame, sector_avg_ret: float, lookback: int = 63):
-    if daily is None or bench_daily is None or len(daily) < 10 or len(bench_daily) < 10:
-        return 0.0, "B:N/A | S:N/A", {}
-    n = min(lookback, len(daily) - 1, len(bench_daily) - 1)
-    stock_ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-n] - 1) * 100
-    bench_ret = (bench_daily["Close"].iloc[-1] / bench_daily["Close"].iloc[-n] - 1) * 100
-    outperform_bench = stock_ret - bench_ret
-    sector_available = pd.notna(sector_avg_ret)
-    outperform_sector = (stock_ret - sector_avg_ret) if sector_available else None
-    score_rs1 = float(np.clip(2.5 + (outperform_bench / 10 * 2.5), 0, 5))
-    score_rs2 = float(np.clip(2.5 + (outperform_sector / 10 * 2.5), 0, 5)) if sector_available else None
-    pts_earned = 0.0
-    pts_max = 0.0
-    if _ss_get("rs_RS1", True):
-        pts_earned += score_rs1
-        pts_max += 5.0
-    # RS2 only counts when we have a genuine sector peer group to compare against.
-    # A stock with no known sector previously got silently compared to the broad
-    # market again here (mislabeled as "sector"), or worse, to an arbitrary group
-    # of other stocks that also happened to have no sector data. Neither is a real
-    # sector comparison, so RS2 is now excluded from the score in that case —
-    # consistent with how missing fundamental data is handled elsewhere.
-    if _ss_get("rs_RS2", True) and sector_available:
-        pts_earned += score_rs2
-        pts_max += 5.0
-    norm_score = (pts_earned / pts_max * 10) if pts_max > 0 else 0.0
-    sector_str = f"{outperform_sector:+.1f}%" if sector_available else "N/A"
-    status_str = f"B:{outperform_bench:+.1f}% | S:{sector_str}"
-    raw_rs = {
-        "RS1_score": round(score_rs1, 2),
-        "RS1_diff": round(outperform_bench, 2),
-        "RS2_score": round(score_rs2, 2) if sector_available else None,
-        "RS2_diff": round(outperform_sector, 2) if sector_available else None,
-    }
-    return round(norm_score, 2), status_str, raw_rs
-
 def fetch_single_stock(tkr: str):
     daily = fetch_daily(tkr)
     info = fetch_info(tkr) if daily is not None else {}
     return tkr, daily, info
 
-def execute_scan(ticker_list, w_fund, w_tech, w_rs, show_progress=True):
+def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     from digest import clamp_pillar_weights, weighted_total
-    w_fund, w_tech, w_rs = clamp_pillar_weights(w_fund, w_tech, w_rs)
+    w_fund, w_tech = clamp_pillar_weights(w_fund, w_tech, w_rs)
     bench_daily = fetch_daily(BENCHMARK)
     stock_data = {}
     sector_returns = {}
@@ -1446,23 +1413,19 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs, show_progress=True):
         raw_sec = info.get("sector", "Unknown")
         sec_abbrev = abbreviate_sector(raw_sec)
         sec_ret = sector_avg.get(raw_sec, np.nan)
-        fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily)
+        fund_score, fund_status, raw_fund = compute_fundamental_score(info, daily, bench_daily, sec_ret)
         tech_score, tech_status, raw_tech = compute_technical_score(daily)
-        rs_score, rs_status, raw_rs = compute_relative_strength_score(daily, bench_daily, sec_ret)
-        total_score = weighted_total(fund_score, tech_score, rs_score, w_fund, w_tech, w_rs)
+        total_score = weighted_total(fund_score, tech_score, w_fund, w_tech)
         results.append({
             "Ticker": tkr,
             "Total Score": round(total_score, 2),
             "Fundamental Score": fund_score,
             "Technical Score": tech_score,
-            "Relative Strength Score": rs_score,
             "Tech Passed": tech_status,
             "CANSLIM Hits": fund_status,
-            "RS Details": rs_status,
             "Sector": sec_abbrev,
             "raw_fund": raw_fund,
             "raw_tech": raw_tech,
-            "raw_rs": raw_rs,
         })
     return pd.DataFrame(results), skipped
 
@@ -1502,7 +1465,7 @@ def _run_streamlit_ui():
         st.rerun()
     st.sidebar.divider()
     st.title("📊 NSE Stock Screener & Portfolio Evaluator")
-    st.caption("Quantitative Multi-Pillar Engine for Stock Market Traders and Investors.")
+    st.caption("Two-pillar engine (CANSLIM fundamentals + technicals) for NSE traders and investors.")
     target_ticker = st.session_state.get("active_inspect_ticker")
     if target_ticker:
         found_row = None
@@ -1525,7 +1488,7 @@ def _run_streamlit_ui():
 
     # ----------------------------------------------------------------------------------
     st.sidebar.header("⚙️ Engine Controls")
-    st.sidebar.subheader("1. Pillar Weights (Sum to 10)")
+    st.sidebar.subheader("1. Pillar Weights")
     def on_weight_change():
         save_user_settings_to_db()
         _persist_digest_pref()
@@ -1535,7 +1498,7 @@ def _run_streamlit_ui():
         10,
         key="w_fund",
         on_change=on_weight_change,
-        help="How much the CANSLIM-style fundamental score counts in Total (0–10). Relative Strength is whatever is left so the three pillars sum to 10.",
+        help="How much the CANSLIM fundamental score counts in Total. Technical takes the rest of the mix; the two weights are scaled if they do not add to 10.",
     )
     w_tech = st.sidebar.slider(
         "Technical Weight",
@@ -1543,25 +1506,20 @@ def _run_streamlit_ui():
         10,
         key="w_tech",
         on_change=on_weight_change,
-        help="How much the 10-point technical score counts in Total. Keep Fundamental + Technical at or below 10 or Relative Strength becomes 0.",
+        help="How much the 10-point technical score counts in Total. Leadership vs Nifty and sector is inside the fundamental score (L / Ls), not a third pillar.",
     )
-    w_rs_calc = 10 - w_fund - w_tech
-    if w_rs_calc < 0:
-        st.sidebar.error("Weight total exceeds 10. Adjust sliders.")
-        w_rs = 0
-    else:
-        w_rs = w_rs_calc
-        st.sidebar.metric(
-            "Relative Strength Weight",
-            w_rs,
-            help="Set automatically as 10 minus Fundamental minus Technical. You cannot type this value.",
-        )
+    _wsum = max(1, int(w_fund) + int(w_tech))
+    st.sidebar.caption(
+        f"Mix: {100 * int(w_fund) / _wsum:.0f}% fundamental / {100 * int(w_tech) / _wsum:.0f}% technical"
+        if int(w_fund) + int(w_tech) > 0
+        else "Set at least one weight above 0."
+    )
     st.sidebar.divider()
     st.sidebar.subheader("2. Pillar Customization")
     if st.sidebar.button(
         "⚙️ Fundamental Rules",
         use_container_width=True,
-        help="Choose which CANSLIM-style checks count toward the fundamental score. Disabled rules are skipped for every ticker.",
+        help="Choose which CANSLIM checks count toward the fundamental score. Disabled rules are skipped for every ticker.",
     ):
         customize_fundamental_modal()
     if st.sidebar.button(
@@ -1570,12 +1528,6 @@ def _run_streamlit_ui():
         help="Choose which of the 10 technical checks count. Each enabled rule that passes adds to the technical score.",
     ):
         customize_technical_modal()
-    if st.sidebar.button(
-        "⚙️ Relative Strength Rules",
-        use_container_width=True,
-        help="Choose Nifty 50 and/or sector-peer relative strength. Disabled benchmarks are omitted from the RS score.",
-    ):
-        customize_rs_modal()
 
     st.sidebar.divider()
     st.sidebar.subheader("Daily morning scores")
@@ -1590,10 +1542,8 @@ def _run_streamlit_ui():
         return {
             "w_fund": w_f,
             "w_tech": w_t,
-            "w_rs": max(0, 10 - w_f - w_t),
             "fund_rules": {k: bool(st.session_state.get(f"fund_{k}", True)) for k in DEFAULT_FUND_PARAMS},
             "tech_rules": {k: bool(st.session_state.get(f"tech_{k}", True)) for k in DEFAULT_TECH_PARAMS},
-            "rs_rules": {k: bool(st.session_state.get(f"rs_{k}", True)) for k in DEFAULT_RS_PARAMS},
         }
 
     def _persist_digest_pref():
@@ -1832,7 +1782,7 @@ def _run_streamlit_ui():
                     fetch_daily.clear()
                     fetch_info.clear()
                 with st.spinner("Running quantitative scan..."):
-                    results_df, skipped = execute_scan(universe, w_fund, w_tech, w_rs)
+                    results_df, skipped = execute_scan(universe, w_fund, w_tech)
                     st.session_state["results_df"] = results_df
                     st.session_state["skipped_tickers"] = skipped
                     st.session_state["last_scan_time"] = pd.Timestamp.now()
@@ -2016,9 +1966,8 @@ def _run_streamlit_ui():
                 st.subheader("📋 Screening Results Table")
                 st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
                 display_table = df[[
-                    "Ticker", "Total Score", "Fundamental Score", 
-                    "Technical Score", "Relative Strength Score", 
-                    "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
+                    "Ticker", "Total Score", "Fundamental Score",
+                    "Technical Score", "Tech Passed", "CANSLIM Hits", "Sector"
                 ]].copy()
                 # ==========================================================================
                 # DISABLED (commented out by request) — WATCHLIST STAR BUTTON
@@ -2036,7 +1985,7 @@ def _run_streamlit_ui():
                         "Select Stock to Inspect:",
                         options=df["Ticker"].tolist(),
                         key="scr_select_tkr",
-                        help="Choose a row to open the pass/fail breakdown for each fundamental, technical, and RS rule.",
+                        help="Choose a row to open the pass/fail breakdown for each fundamental and technical rule.",
                     )
                 with c_ctrl2:
                     st.write(f"Selected: **{selected_ticker}**")
@@ -2046,7 +1995,7 @@ def _run_streamlit_ui():
                         key="scr_view_btn",
                         use_container_width=True,
                         type="primary",
-                        help="Show why this ticker received its fundamental, technical, and relative-strength scores.",
+                        help="Show why this ticker received its fundamental and technical scores.",
                     ):
                         st.session_state["active_inspect_ticker"] = selected_ticker
                         st.rerun()
@@ -2075,16 +2024,13 @@ def _run_streamlit_ui():
                     column_config={
                         "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
                         "Total Score": st.column_config.NumberColumn(
-                            "Total", format="%.2f", help="Weighted blend of Fund, Tech, and RS. At most 10 when pillar weights sum to 10."
+                            "Total", format="%.2f", help="Weighted blend of Fund and Tech. Scaled if those two weights do not add to 10."
                         ),
                         "Fundamental Score": st.column_config.NumberColumn(
-                            "Fund", format="%.2f", help="0–10 from enabled CANSLIM-style rules that this ticker passed."
+                            "Fund", format="%.2f", help="0–10 from enabled CANSLIM rules that this ticker passed (L/Ls are vs Nifty and sector)."
                         ),
                         "Technical Score": st.column_config.NumberColumn(
                             "Tech", format="%.2f", help="0–10 from enabled technical rules that this ticker passed."
-                        ),
-                        "Relative Strength Score": st.column_config.NumberColumn(
-                            "RS", format="%.2f", help="0–10 from enabled RS benchmarks versus Nifty 50 and/or sector peers."
                         ),
                     }
                 )
@@ -2181,7 +2127,7 @@ def _run_streamlit_ui():
                 help="Score every loaded holding with the same weights and rules as the screener. Average Total is the portfolio health score.",
             ):
                 with st.spinner("Evaluating portfolio holdings against 3-Pillar engine..."):
-                    p_results, p_skipped = execute_scan(parsed_portfolio_tickers, w_fund, w_tech, w_rs)
+                    p_results, p_skipped = execute_scan(parsed_portfolio_tickers, w_fund, w_tech)
                 
                     if not p_results.empty:
                         p_results = p_results.sort_values("Total Score", ascending=False).reset_index(drop=True)
@@ -2211,9 +2157,8 @@ def _run_streamlit_ui():
             st.subheader("📊 Portfolio Scoring Matrix")
             st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
             p_table = p_results[[
-                "Ticker", "Total Score", "Fundamental Score", 
-                "Technical Score", "Relative Strength Score", 
-                "Tech Passed", "CANSLIM Hits", "RS Details", "Sector"
+                "Ticker", "Total Score", "Fundamental Score",
+                "Technical Score", "Tech Passed", "CANSLIM Hits", "Sector"
             ]].copy()
             c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 2, 1])
             with c_ctrl1:
@@ -2231,7 +2176,7 @@ def _run_streamlit_ui():
                     key="port_view_btn",
                     use_container_width=True,
                     type="primary",
-                    help="Show why this holding received its fundamental, technical, and relative-strength scores.",
+                    help="Show why this holding received its fundamental and technical scores.",
                 ):
                     st.session_state["active_inspect_ticker"] = p_selected_ticker
                     st.rerun()
@@ -2242,16 +2187,13 @@ def _run_streamlit_ui():
                 column_config={
                     "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
                     "Total Score": st.column_config.NumberColumn(
-                        "Total", format="%.2f", help="Weighted blend of Fund, Tech, and RS. At most 10 when pillar weights sum to 10."
+                        "Total", format="%.2f", help="Weighted blend of Fund and Tech. Scaled if those two weights do not add to 10."
                     ),
                     "Fundamental Score": st.column_config.NumberColumn(
-                        "Fund", format="%.2f", help="0–10 from enabled CANSLIM-style rules that this holding passed."
+                        "Fund", format="%.2f", help="0–10 from enabled CANSLIM rules that this holding passed."
                     ),
                     "Technical Score": st.column_config.NumberColumn(
                         "Tech", format="%.2f", help="0–10 from enabled technical rules that this holding passed."
-                    ),
-                    "Relative Strength Score": st.column_config.NumberColumn(
-                        "RS", format="%.2f", help="0–10 from enabled RS benchmarks versus Nifty 50 and/or sector peers."
                     ),
                 }
             )
@@ -2286,7 +2228,7 @@ def _run_streamlit_ui():
             """
             * **Step A (Select Universe):** Pick a live source — **Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, or F&O Stocks** — refreshed daily from NSE, or upload your own CSV/Excel file of stock symbols.
             * **Step B (Execute Scan):** Click **Run Screener Scan**. The multi-threaded engine fetches quarterly fundamentals and technical indicators in real-time.
-            * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics, technical rules, or RS calculations passed or failed.
+            * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics or technical rules passed, failed, or were skipped.
             """
         )
         st.markdown("#### **2. Portfolio Evaluator (Auditing Holdings Health)**")
@@ -2300,8 +2242,8 @@ def _run_streamlit_ui():
         st.markdown("#### **3. Pillar Settings & Weightage Adjustment**")
         st.markdown(
             """
-            * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight** in the sidebar. The engine auto-calculates the remaining **Relative Strength Weight** so all three total 10.
-            * **Customize Rules:** Click **Fundamental Rules**, **Technical Rules**, or **Relative Strength Rules** in the sidebar to toggle specific criteria on/off.
+            * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight**. Total is a mix of those two scores (scaled if they do not add to 10). Leadership vs Nifty and sector is inside the fundamental score (L / Ls).
+            * **Customize Rules:** Click **Fundamental Rules** or **Technical Rules** in the sidebar to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
             * **Morning email:** Check **Email me weekday morning scores** in the sidebar. At 8:30 AM IST on weekdays the job emails (or writes) the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Generate preview digest** to try it now. This is a score ranking, not a stock pick.
             """
@@ -2309,45 +2251,48 @@ def _run_streamlit_ui():
         st.markdown("#### **4. Export to TradingView**")
         st.markdown(
             """
-            * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to $\ge 7.0$ for top candidates).
+            * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to 7.0 or higher for top candidates).
             * **Step B (Copy Formatted Strings):** Click the copy icon in the formatted code snippet box (e.g., `NSE:TRENT,NSE:HAL,NSE:TATAMOTORS`).
             * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously.
             """
         )
         st.divider()
-        st.markdown("### 🏛️ Scoring Pillar Documentation")
-        col_g1, col_g2, col_g3 = st.columns(3)
-    
+        st.markdown("### 🏛️ Scoring documentation")
+        col_g1, col_g2 = st.columns(2)
+
         with col_g1:
-            st.markdown("#### **Pillar 1: Fundamental Rules (CANSLIM-7)**")
+            st.markdown("#### **Pillar 1: Fundamental (CANSLIM)**")
             st.markdown(
                 """
-                * **C - Current EPS:** Latest quarter vs same quarter last year; diluted EPS preferred, else net income; skip if missing. Pass if growth > 15%.
-                * **A - Annual Revenue:** Quarterly revenue growth > 10% YoY.
-                * **N - Near 52W High:** Current price within 25% of 52-week high.
-                * **S - Base Tightness:** 10-day volatility $\le 6\%$ and price near 50 DMA.
-                * **L - Leader RS:** Daily RSI > 55.
-                * **I - Institutional Ownership:** Institutional holdings > 30%.
-                * **M - Market Direction:** Benchmark Nifty 50 above its 200 DMA.
+                Enabled rules that can be evaluated are pass/fail. Missing data is **skipped** (not a fail). Score = passes ÷ evaluated × 10.
+
+                * **C — Current earnings:** Latest quarter vs same quarter last year. Diluted EPS preferred, else net income. Pass if growth > **15%**. Yahoo annual `earningsGrowth` is not used.
+                * **A — Sales:** Latest quarter **Total Revenue** vs same quarter last year. Pass if growth > **10%**. Cost of goods and Yahoo annual `revenueGrowth` are not used.
+                * **N — New high:** Last price within **10%** of the 52-week high. The high is the better of Yahoo’s figure and the last **252** daily highs.
+                * **S — Demand:** Over the last **20** sessions, volume on up-close days must exceed volume on down-close days. Tight bases are **T1/T2**, not S.
+                * **L — Leader vs Nifty:** ~63-day return beats Nifty 50.
+                * **Ls — Leader vs sector:** The same 63-day return beats same-sector names **in this scan**. Skipped if sector is unknown.
+                * **I — Institutions:** Yahoo `heldPercentInstitutions` > **30%** of shares outstanding. Promoter-heavy names often fail. Skipped if missing.
+                * **M — Market:** Nifty 50 above its 200-DMA. **Every stock gets the same result.** Does not rank names against each other.
+
+                You can turn any letter off. This is a strength score, not a go/no-go filter.
                 """
             )
         with col_g2:
-            st.markdown("#### **Pillar 2: Technical Momentum Rules**")
+            st.markdown("#### **Pillar 2: Technical (T1–T10)**")
             st.markdown(
                 """
-                * **Trend Alignment:** Price > 200 DMA and within 5% of 50 DMA.
-                * **Stage 2 Proximity:** Price $\le 1.25 \times 200\text{ DMA}$.
-                * **MA Slopes:** 50 DMA and 200 DMA sloping upward over 5 bars.
-                * **Multi-Timeframe Oscillators:** Daily, Weekly, and Monthly RSI > 50 and rising; MACD line rising across timeframes.
-                """
-            )
-        with col_g3:
-            st.markdown("#### **Pillar 3: Relative Strength Matrix**")
-            st.markdown(
-                """
-                * **RS1 (Broad Market Performance):** Evaluates 3-month (63-day) rolling percentage return compared directly against Nifty 50 (^NSEI).
-                * **RS2 (Sector Peer Outperformance):** Measures quarterly stock performance relative to its sector average return.
-                * **Scoring Bounds:** Normalizes performance differentials into a clean 0 to 10 points scale.
+                Ten pass/fail chart checks. Missing data **fails**. Fewer than 30 daily bars → technical score 0. (These tests are unchanged pending a later review.)
+
+                * **T1:** Close > 200-DMA and within 5% of the 50-DMA.
+                * **T2:** Within 5% of the 20- **or** 50-DMA, and 10-day close volatility ≤ 6%.
+                * **T3:** Close above the 200-DMA but not more than 25% above it.
+                * **T4:** 50-DMA and 200-DMA each higher than 5 bars ago.
+                * **T5 / T6 / T7:** RSI > 50 and rising (monthly / weekly / daily). “Rising” = higher than 2 bars ago.
+                * **T8 / T10:** MACD line rising (monthly / daily).
+                * **T9:** Weekly MACD above its signal, MACD > 0, and the line rising.
+
+                Total = (Fundamental × fund weight + Technical × tech weight) ÷ (fund + tech weights).
                 """
             )
 
@@ -2373,7 +2318,6 @@ def _run_streamlit_ui():
                     "Active Weights": {
                         "Fundamental": w_fund,
                         "Technical": w_tech,
-                        "Relative Strength": w_rs
                     }
                 })
             

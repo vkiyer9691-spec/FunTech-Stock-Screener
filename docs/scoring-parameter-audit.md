@@ -388,17 +388,19 @@ No longer a third pillar. 63-day vs Nifty and vs sector become **L vs Nifty** an
 
 ---
 
-## Locked decisions (implement in the next scoring batch)
+## Locked decisions
 
-- **C2** — already in production code.
-- **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”.
+Implemented in scoring + User Guide (except T1–T10, which are documented as-is pending a later review):
+
+- **C2** — quarterly EPS YoY.
+- **A2** — quarterly Total Revenue YoY; skip if missing.
 - **N2 + N4** — within 10% of 52-week high; high from daily bars (merge Yahoo if present).
-- **S3 (20 trading days)** — up-volume > down-volume; skip if missing; relabel demand. Tightness stays T1/T2.
-- **L9a** — drop RS pillar; L vs Nifty and L vs sector (63-day returns); skip sector if unknown; show % in breakdown only.
-- **I1** — Yahoo institutions > 30%; skip if missing; keep as one optional dimension.
-- **M1** — Nifty > 200-DMA on every stock (same pass/fail for the whole scan).
-- **Help/User Guide** — rewrite to match locked rules (CANSLIM + T1–T10) in the same code drop.
+- **S3 (20 trading days)** — up-volume > down-volume; skip if missing.
+- **L9a** — two-pillar model; **L** vs Nifty and **Ls** vs sector; RS pillar removed.
+- **I1** — Yahoo institutions > 30%; skip if missing.
+- **M1** — Nifty > 200-DMA on every stock.
+- **Help/User Guide** — rewritten to match the rules above. T1–T10 described as currently coded.
 
-## Pending your reply
+## Pending
 
-- **T1–T10** — keep as written, or change T2 (almost always pass) / missing-data policy
+- **T1–T10** — full review later (T-keep for now).

@@ -26,7 +26,7 @@ OUTBOX_DIR = ROOT / "digest_outbox"
 
 QUICK_UNIVERSES = ["Nifty 50", "Nifty Next 50"]
 DEFAULT_TOP_N = 10
-DEFAULT_WEIGHTS = (4, 4, 2)
+DEFAULT_WEIGHTS = (5, 5)
 DEFAULT_FROM_NAME = "FunTech Screener"
 DIGEST_TITLE = "FunTech daily morning scores"
 # Reserved .invalid TLD — replies bounce instead of landing in SMTP_FROM.
@@ -73,46 +73,37 @@ DISCLAIMER = (
 )
 
 
-def clamp_pillar_weights(w_fund, w_tech, w_rs=None) -> tuple[int, int, int]:
-    """Match the sidebar: RS is the leftover of 10, never an independent extra weight.
-
-    A stale user_settings.w_rs (e.g. 2 while fund=1 and tech=9) used to make
-    weights sum to 12 and Total scores exceed 10.
-    """
-    w_fund = max(0, min(10, int(w_fund)))
-    w_tech = max(0, min(10, int(w_tech)))
-    w_rs = max(0, 10 - w_fund - w_tech)
-    return w_fund, w_tech, w_rs
+def clamp_pillar_weights(w_fund, w_tech, w_rs=None) -> tuple[int, int]:
+    """Two pillars only. w_rs is ignored (legacy settings)."""
+    w_fund = max(0, min(10, int(w_fund or 0)))
+    w_tech = max(0, min(10, int(w_tech or 0)))
+    return w_fund, w_tech
 
 
-def weighted_total(fund_score: float, tech_score: float, rs_score: float, w_fund: int, w_tech: int, w_rs: int) -> float:
-    denom = w_fund + w_tech + w_rs
+def weighted_total(fund_score: float, tech_score: float, w_fund: int, w_tech: int) -> float:
+    denom = w_fund + w_tech
     if denom <= 0:
         return 0.0
-    return (fund_score * w_fund + tech_score * w_tech + rs_score * w_rs) / denom
+    return (fund_score * w_fund + tech_score * w_tech) / denom
 
 
 def normalize_settings(settings: dict | None) -> dict:
     settings = settings or {}
-    w_fund, w_tech, w_rs = clamp_pillar_weights(
+    w_fund, w_tech = clamp_pillar_weights(
         settings.get("w_fund", DEFAULT_WEIGHTS[0]),
         settings.get("w_tech", DEFAULT_WEIGHTS[1]),
-        settings.get("w_rs"),
     )
     fund_rules = dict(settings.get("fund_rules") or {})
     tech_rules = dict(settings.get("tech_rules") or {})
-    rs_rules = dict(settings.get("rs_rules") or {})
     overrides = {}
-    for prefix, rules in (("fund", fund_rules), ("tech", tech_rules), ("rs", rs_rules)):
+    for prefix, rules in (("fund", fund_rules), ("tech", tech_rules)):
         for key, val in rules.items():
             overrides[f"{prefix}_{key}"] = bool(val)
     return {
         "w_fund": w_fund,
         "w_tech": w_tech,
-        "w_rs": w_rs,
         "fund_rules": fund_rules,
         "tech_rules": tech_rules,
-        "rs_rules": rs_rules,
         "overrides": overrides,
     }
 
@@ -132,7 +123,7 @@ def save_pref(user_id: str, email: str, opt_in: bool, top_n: int, settings: dict
         row.update({k: v for k, v in normalize_settings(settings).items() if k != "overrides"})
     else:
         existing = data.get(str(user_id)) or {}
-        for key in ("w_fund", "w_tech", "w_rs", "fund_rules", "tech_rules", "rs_rules"):
+        for key in ("w_fund", "w_tech", "fund_rules", "tech_rules"):
             if key in existing:
                 row[key] = existing[key]
     data[str(user_id)] = row
@@ -312,7 +303,6 @@ def rank_universes(results_df: pd.DataFrame, universe_map: dict[str, list], top_
                 "Total Score": float(r["Total Score"]),
                 "Fundamental Score": float(r["Fundamental Score"]),
                 "Technical Score": float(r["Technical Score"]),
-                "Relative Strength Score": float(r["Relative Strength Score"]),
                 "Sector": r.get("Sector", "Unknown"),
             })
         sections.append({
@@ -326,16 +316,16 @@ def rank_universes(results_df: pd.DataFrame, universe_map: dict[str, list], top_
 def render_html(sections: list[dict], generated_at: datetime, top_n: int, settings: dict | None = None) -> str:
     when = generated_at.astimezone(IST).strftime("%A, %d %b %Y, %H:%M IST")
     cfg = normalize_settings(settings)
-    weight_sum = cfg["w_fund"] + cfg["w_tech"] + cfg["w_rs"]
+    weight_sum = cfg["w_fund"] + cfg["w_tech"]
     settings_line = (
-        f"Your weights: Fundamental {cfg['w_fund']} / Technical {cfg['w_tech']} / "
-        f"Relative Strength {cfg['w_rs']} (sum {weight_sum}). Rankings use only the rules you have enabled."
+        f"Your weights: Fundamental {cfg['w_fund']} / Technical {cfg['w_tech']} "
+        f"(sum {weight_sum}; scaled if they do not add to 10). Rankings use only the rules you have enabled."
     )
     blocks = []
     for sec in sections:
         rows_html = []
         if not sec["rows"]:
-            rows_html.append("<tr><td colspan='7'>No scored tickers in this universe today.</td></tr>")
+            rows_html.append("<tr><td colspan='6'>No scored tickers in this universe today.</td></tr>")
         else:
             for i, r in enumerate(sec["rows"], start=1):
                 rows_html.append(
@@ -345,7 +335,6 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
                     f"<td>{r['Total Score']:.2f}</td>"
                     f"<td>{r['Fundamental Score']:.2f}</td>"
                     f"<td>{r['Technical Score']:.2f}</td>"
-                    f"<td>{r['Relative Strength Score']:.2f}</td>"
                     f"<td>{r.get('Sector', '')}</td>"
                     "</tr>"
                 )
@@ -354,7 +343,7 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
             f"<p style='color:#555'>Index/group size {sec['tickers_scanned']}. Showing {top_n} stocks by total score.</p>"
             "<table cellpadding='8' cellspacing='0' border='1' style='border-collapse:collapse;width:100%;font-size:14px'>"
             "<thead><tr style='background:#111;color:#fff'>"
-            "<th>#</th><th>Ticker</th><th>Total</th><th>Fund</th><th>Tech</th><th>RS</th><th>Sector</th>"
+            "<th>#</th><th>Ticker</th><th>Total</th><th>Fund</th><th>Tech</th><th>Sector</th>"
             "</tr></thead>"
             f"<tbody>{''.join(rows_html)}</tbody></table>"
         )
@@ -434,7 +423,7 @@ def _score_universe(screener, all_tickers, settings: dict, show_progress: bool):
     screener.set_score_overrides(cfg["overrides"])
     try:
         return screener.execute_scan(
-            all_tickers, cfg["w_fund"], cfg["w_tech"], cfg["w_rs"], show_progress=show_progress
+            all_tickers, cfg["w_fund"], cfg["w_tech"], show_progress=show_progress
         )
     finally:
         screener.set_score_overrides(None)
