@@ -236,6 +236,30 @@ Possible non-RS stand-ins (not classical L):
 
 Do not call margin rank “CANSLIM L.” Prefer **L4**, or a separately named quality-vs-peers rule (**L6**).
 
+**Fold RS into L and drop the third pillar? (your proposal)**
+
+Yes, that is coherent. RS1/RS2 **are** CANSLIM L with extra UI. A third pillar exists only to (1) score leadership on a **0–10 slider of its own**, and (2) keep **how much** a name beat Nifty/peers, not just yes/no.
+
+**What you would lose**
+
+- **Magnitude.** RS1 maps ±10pp vs Nifty onto 0–5. Beating Nifty by 0.2% and by 20% are different scores. A pass/fail L treats both as pass.
+- **Weight.** Leadership is currently a whole pillar (`10 − fund − tech`). If L is **one of seven** fundamental ticks and fund is half the total, L is ~7% of the score. Today RS can easily be 20–40% of the total. Folding L in **shrinks** leadership unless we give it extra weight.
+
+**Ways to do it**
+
+| ID | Model | Clutter | Leadership weight |
+|---|---|---|---|
+| **L9a** | Drop RS pillar. L = pass if 63d return > Nifty. Sector vs-peers as optional second tick **L-sec** (old RS2), skip if no sector | Two pillars, two sliders | 1–2 / N fund rules |
+| **L9b** | Same, but L passes only if **both** beat Nifty **and** beat sector | Even simpler | 1 / N |
+| **L9c** | Drop RS pillar; L is the **old continuous 0–10 RS score mixed into the fundamental average** | Odd hybrid (binary + continuous in one pillar) | You pick a blend |
+| L4 | Drop L from fund; **keep** RS pillar (rename it L in the UI) | Still three weights | Unchanged |
+
+**Recommendation:** **L9a**, not L4, if your priority is less clutter. Two pillars: Fundamental (C, A, N, S, **L vs Nifty**, **L vs sector**, I, M) and Technical. Show the % vs Nifty and vs sector in the breakdown **as facts**, not as a third score. Accept that leadership will matter less in the total than it does today unless you later give L two ticks (which L9a already does).
+
+Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
+
+**Lean: L9a — not locked.**
+
 ---
 
 ## I — Institutional sponsorship
@@ -324,6 +348,6 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 
 ## Pending your reply
 
-- **L** — leaning **L4**; qualitative alternatives L6/L7/L8 discussed; confirm
+- **L / RS pillar** — leaning **L9a** (fold RS1+RS2 into L as two fund ticks; drop third pillar); confirm L9a / L9b / L4
 - **I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
