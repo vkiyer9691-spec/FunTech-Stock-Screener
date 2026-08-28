@@ -112,7 +112,7 @@ So 25% passes **~4 in 5** large caps; 10% passes **~1 in 3**; 5% is a true “ne
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: S3, 20 trading days — not in code yet (batch)** |
 | Sidebar | Supply/Demand (Tight Base Consolidation) |
 | Help / UG | 10-day volatility ≤ 6% **and** price near 50-DMA (code: within **5%** of 50-DMA) |
 | **Code (S1)** | Needs ≥ 50 daily bars. Pass if 10-day close std/mean ≤ 6% **and** \|close − SMA50\| / SMA50 ≤ 5%. Skip if < 50 bars. If SMA50 is NaN, distance is set to 99 → **fail** (not skip). |
@@ -170,7 +170,9 @@ S3 is still only **half** of O’Neil S (demand, not small supply). That is the 
 
 Names tightness and volume **disagree** on (50d): Kotak and Titan **fail S1 / pass S3** (weak coil, but buyers have been more active). Reliance, ITC, L&T, Axis, NTPC, Power Grid **pass S1 / fail S3** (quiet near the 50-DMA, but more volume on down days).
 
-**Suggested lock:** **S3 with 50 trading days, pass if up-volume > down-volume, skip if volume/bars missing.** Keep T1/T2 as the tightness rules. Do not also keep S1.
+**Agreed (S3, 20 days):** Last **20** sessions: sum volume on up-close days vs down-close days. Pass if up-volume > down-volume. Skip if volume or bars missing. Flat closes ignored. Relabel as demand / accumulation (not tight base). Tightness stays on **T1/T2**. Do not keep S1.
+
+You chose 20 days over 50 knowing it is jumpy. On the sample that is **10 pass / 14 fail**.
 
 ---
 
@@ -178,22 +180,45 @@ Names tightness and volume **disagree** on (50d): Kotak and Titan **fail S1 / pa
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not locked |
+| **Status** | Open — discussed; not locked |
 | Sidebar / UG | Leader RS: Daily RSI > 55 |
-| Classic L | Leader = high **relative strength** vs the market (IBD RS 80+), not RSI |
-| **Code** | 14-day RSI of daily close > 55. Skip if < 14 bars or RSI NaN. |
-| Overlap | RS1/RS2 already score vs Nifty and sector. T7 is daily RSI > 50 and rising. L is a third RSI-ish check. |
+| **Code (L1)** | 14-day RSI of daily close > 55. Skip if < 14 bars or RSI is NaN. |
+
+**What O’Neil’s L actually is**
+
+L is **Leader or Laggard**. He wanted stocks that are **already leading the market**, not cheap laggards “about to catch up.” IBD expressed that as a **Relative Strength rating** (leaders often 80–90+ vs the rest of the exchange). That is **price vs the market over months**, not an oscillator.
+
+RSI > 55 only says the name has been bid up over ~14 days. A leader can have RSI 40 after a short rest; a laggard can have RSI 70 on a dead-cat bounce.
+
+**Overlap**
+
+- **T7:** daily RSI > **50** and **rising** — almost the same oscillator.
+- **RS1:** 63-day return vs Nifty, scored 0–5 continuously. That *is* classical L, already in another pillar.
+
+**Nifty 50 first 25 (28 Aug 2026):**
+
+| Rule | Pass | Fail | Skip |
+|---|---:|---:|---:|
+| **L1 RSI > 55 (current)** | 3 | 21 | 1 |
+| L2 RSI > 60 | 3 | 21 | 1 |
+| T7 RSI > 50 and rising | 6 | 18 | 1 |
+| **L3 63-day return > Nifty** | 13 | 11 | 1 |
+
+L1 passers: only **Kotak (RSI 76), Titan (71), Adani Ent (65)** — all also beat Nifty. L1 vs T7 matched **21/24** (TCS, Infosys, Axis pass T7, fail L1). L1 vs true RS (L3) matched only **14/24**: ten names **beat Nifty** but fail RSI 55 (ICICI, SBI, Bajaj Finance, M&M, Sun Pharma, …).
+
+So L1 is a **strict short-term momentum cut**, not “leader vs laggard.” In this tape it almost never passes.
 
 **Options**
 
 | ID | Rule |
 |---|---|
-| L1 | Keep RSI > 55 |
-| L2 | Raise to RSI > 60 |
-| L3 | Replace L with a pass/fail on RS vs Nifty (e.g. 63-day return > benchmark) — overlaps RS1 |
-| L4 | Drop L from fundamentals (leadership lives in the RS pillar) |
+| L1 | Keep RSI > 55 (strict; duplicates T7’s family) |
+| L2 | RSI > 60 (same 3 names here) |
+| **L3** | Pass if 63-day return > Nifty (binary cousin of RS1) |
+| L4 | Drop L from fundamentals; leadership stays in RS1/RS2 |
+| L5 | Keep L1 but raise T7’s role only — not recommended |
 
-**Recommended discussion:** L1 unless you want L to mean true RS (then L3 or L4).
+**Recommended:** **L4** if you do not want two copies of leadership, or **L3** if you want a pass/fail “beats the market” point in the CANSLIM pillar and are fine that RS1 still scores the *amount* of outperformance. I would **not** keep RSI as L.
 
 ---
 
@@ -279,9 +304,10 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 - **C2** — already in production code.
 - **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”.
 - **N2 + N4** — within 10% of 52-week high; high from daily bars (merge Yahoo if present).
+- **S3 (20 trading days)** — up-volume > down-volume; skip if missing; relabel demand. Tightness stays T1/T2.
 
 ## Pending your reply
 
-- **S** — leaning **S3 (50d up/down volume)**; confirm lookback 20 vs 50
-- **L, I, M** — pick IDs or “keep”
+- **L** — L1 / L2 / L3 / L4
+- **I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
