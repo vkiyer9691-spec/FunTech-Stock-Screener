@@ -52,7 +52,7 @@ python run_daily_digest.py --preview --quick
 python run_daily_digest.py --send
 ```
 
-GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**.
+GitHub Actions (`.github/workflows/morning-digest.yml`) is scheduled for **03:00 UTC (8:30 AM IST) Monday–Friday**. GitHub only queues that timer after it has indexed the workflow; a missed morning can be retried with **Run workflow**. A one-off cron at **03:50 UTC on 28 Aug (9:20 AM IST)** is included so 28 Aug 2026 can still send after the 8:30 slot was skipped.
 
 To test delivery, use **Actions → Daily morning scores → Run workflow** on branch `main` (do not click **Re-run** on an old run — that replays the old commit). Leave **Quick preview** on, and optionally fill **Also send to this email**.
 

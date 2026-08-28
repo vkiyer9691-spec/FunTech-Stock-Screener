@@ -1,9 +1,13 @@
 name: Daily morning scores
 
 # 08:30 Asia/Kolkata = 03:00 UTC. Indian cash market opens 09:15 IST.
+# GitHub never queued the 03:00 UTC schedule on 28 Aug 2026 (no `schedule`
+# runs exist — only manual workflow_dispatch). Extra cron below is 09:20 IST
+# on 28 Aug so today's mail can still go out.
 on:
   schedule:
     - cron: "0 3 * * 1-5"
+    - cron: "50 3 28 8 *"
   workflow_dispatch:
     inputs:
       quick:
