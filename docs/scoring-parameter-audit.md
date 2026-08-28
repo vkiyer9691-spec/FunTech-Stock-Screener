@@ -344,7 +344,7 @@ Failing M lowers everyone’s fundamental score by the same fraction (one fewer 
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: G1-keep, T2-keep, G3-keep, G4-keep** — all T1–T10 left as coded (no remaining T patches) |
 | Scoring | Pass/fail. Missing data **fails** (unlike C/A/N…). Need ≥ 30 daily bars or the whole pillar is 0. |
 
 These are **chart health** checks on the stock itself, not vs Nifty (that is L). They overlap each other on purpose (trend + oscillators on three timeframes).
@@ -378,6 +378,10 @@ Median technical score on that sample: **3.5 / 10**. ICICI 9, Titan/Adani Ent 8;
 
 **Group 3 (T5–T7) — locked: G3-keep.** RSI > 50 and rising on monthly, weekly, and daily.
 
+**Group 4 (T8–T10) — locked: G4-keep.** Leave the MACD stack as written: monthly and daily only “sloping up” (line higher than 2 bars ago; can still be below zero or below signal); weekly is the strict constructive test (line > signal, line > 0, and rising).
+
+Rationale (user): weekly strength is an **early** tell that monthly is likely to follow, so monthly only needs to be sloping up. Daily sloping up **on the back of** that weekly intermediate-term strength is a **swing-entry** tell — the daily timeframe ready after a retracement. That is why T9 is tighter than T8/T10; the three ticks are not meant to be the same test on three calendars.
+
 ---
 
 ## RS1 / RS2 — folded into L (L9a)
@@ -402,7 +406,8 @@ Implemented in scoring + User Guide. T1–T10 reviewed in groups:
 - **T Group 1 (T1/T3/T4)** — **G1-keep** (not a code change).
 - **T Group 2 (T2)** — **T2-keep** (not a code change).
 - **T Group 3 (T5–T7)** — **G3-keep** (not a code change).
+- **T Group 4 (T8–T10)** — **G4-keep** (not a code change). Weekly = early intermediate-term MACD strength; monthly = slope only; daily = slope as swing-entry after retracement.
 
 ## Pending
 
-- **T Group 4 (T8–T10)** — MACD monthly / weekly / daily
+None on T1–T10. Scoring parameter audit for C/A/N/S/L/I/M and T is complete; remaining work is outside this log (e.g. optional later tech missing-data=skip).
