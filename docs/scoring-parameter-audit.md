@@ -37,50 +37,74 @@ Working log of **intention vs code** for FunTech scores. Discuss and decide here
 
 | Field | Value |
 |---|---|
-| **Status** | **Open — waiting on your pick** |
-| Sidebar | Annual Revenue Growth > 10% |
+| **Status** | **Locked: A2 — not in code yet (batch)** |
+| Sidebar | Annual Revenue Growth > 10% *(will be relabeled to quarterly Total Revenue)* |
 | Help | Annual revenue growth must be above 10% |
 | User Guide | Quarterly revenue growth > 10% YoY |
 | Classic CANSLIM A | Annual **EPS** over years (often 25%+), not sales |
 | **A1 (current)** | First quarterly row whose name contains `"revenue"` (often **Cost Of Revenue**), latest vs ~4 quarters back if year-ago > 0; else Yahoo `revenueGrowth` |
 | Bug | Cost-of-goods matched before Total Revenue. Coal India A1 +125% costs vs +5% sales. Reliance A1 +23% costs vs +18% sales. |
+| **Agreed (A2)** | Latest quarter **Total Revenue** vs ~4 quarters back (same helper as C2). Skip if missing. No Yahoo `revenueGrowth` fallback. Threshold stays **10%**. Relabel so it does not say “Annual”. |
 
-**Options (Nifty 50 first 25, 28 Aug 2026 Yahoo)**
+**Options (Nifty 50 first 25, 28 Aug 2026 Yahoo)** — A2 chosen
 
 | ID | Rule | Pass | Fail | Skip | vs A1 |
 |---|---|---:|---:|---:|---|
 | A1 | Current (cost-of-revenue trap + Yahoo fallback) | 16 | 8 | 1 | — |
-| **A2** | Quarterly **Total Revenue** YoY; skip if missing (C2-style). **Recommended.** | 14 | 9 | 2 | 23/25 |
+| **A2** | Quarterly **Total Revenue** YoY; skip if missing | 14 | 9 | 2 | 23/25 |
 | A3 | Yahoo `revenueGrowth` only (usually TTM/annual) | 18 | 6 | 1 | 21/25 |
 | A4 | Latest full-year sales vs prior year > 10% | 9 | 15 | 1 | 14/25 |
 | A5 | Annual diluted EPS > 25% (copybook A) | 5 | 19 | 1 | 12/25 |
 
 A1 vs A2 diffs: **HDFCBANK** A1 pass (Yahoo annual) / A2 skip (only 3 quarterly columns); **COALINDIA** A1 pass / A2 fail. Tata Motors skip (Yahoo 404).
 
-A2 matches the User Guide (quarterly sales), not the sidebar word “Annual”, and not O’Neil A (that is A5).
+A2 is consistent with C2. It is still **sales**, not copybook A (annual EPS).
 
 ---
 
-## N — New high / near high
+## N — New (products, management, highs)
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not locked |
+| **Status** | Open — discussed; not locked |
 | Sidebar / UG | Near 52-week high (within 25%) |
-| Classic N | New products/management **and/or** price making new highs (often within ~5–10% of the high, not 25%) |
-| **Code** | `currentPrice` (Yahoo) or last close ≥ **75%** of Yahoo `fiftyTwoWeekHigh` (i.e. can be **25% off** the high). Skip if either missing. |
-| Notes | 25% is a wide band: a stock 25% below the high still passes. High is Yahoo `year_high`, not always the true NSE 52-week high. |
+| Classic N | See below. Quantitative half = **new price highs**, not “25% off the high”. |
+| **Code (N1)** | `currentPrice` (Yahoo fast_info / info) or last close ≥ **75%** of Yahoo `fiftyTwoWeekHigh`. Skip if high or price missing. |
+| Data | On 28 Aug 2026 this environment’s `fast_info.year_high` was empty for all 25 sample names, so N would skip unless `t.info` fills `fiftyTwoWeekHigh`. Daily bars still have a usable 52-week high. |
+
+**What O’Neil’s N actually is**
+
+N is **New**: new products or services that drive a step-change in earnings, new management, and/or **new price highs**. The investable expression on the chart is a stock leaving a base and making (or sitting right under) a 52-week high — “buy high, sell higher.” He did not mean “the stock is merely not in a collapse.” Constructive pullbacks in that system are often on the order of **8–12%** from the high, sometimes ~15% in a deeper but still valid base. **25% off** is usually “wide and loose” / a failed move, not a new-high leader.
+
+We only code the **price** half. New products and new management are qualitative and stay out of the score unless we add a manual flag later.
+
+**Is the current rule a decent proxy?**
+
+It is a **weak, one-sided proxy**. Directionally it drops deep laggards (IT/FMCG names ~26–34% below the 1-year high on this sample). It does **not** require a new high, a breakout, or even “near” the high. At 25%, it behaves more like “still in a broad uptrend / not a wreck” than CANSLIM N.
+
+Nifty 50 first 25, **distance from max daily high over ~1 year** (Yahoo `year_high` missing here):
+
+| Band | Pass | Fail | Skip | Who |
+|---|---:|---:|---:|---|
+| **25% (current N1)** | 19 | 5 | 1 | Fails: INFY, ITC, TCS, HDFCBANK, HUL (HUL only just: 25.8%) |
+| **10% (N2)** | 8 | 16 | 1 | Pass e.g. TITAN, ICICI, ADANIENT, SUNPHARMA, KOTAK, LT, BAJFINANCE, BAJAJFINSV |
+| **5% (N3)** | 3 | 21 | 1 | TITAN ~0.7%, ICICI ~2.4%, ADANIENT ~2.7% |
+
+So 25% passes **~4 in 5** large caps; 10% passes **~1 in 3**; 5% is a true “near high” filter.
+
+**N4** (high = max(Yahoo high, last 252 daily highs)) is a **data fix**, not a tightness choice. It can be stacked on N1/N2/N3. Recommended if we keep any near-high rule, because Yahoo `year_high` is unreliable here.
 
 **Options**
 
 | ID | Rule |
 |---|---|
-| N1 | Keep: within 25% of 52-week high |
-| N2 | Tighten to within **10%** of high |
-| N3 | Tighten to within **5%** of high (closer to “new high”) |
-| N4 | Use max of Yahoo high and the last 252 daily closes (fix stale/wrong Yahoo high) |
+| N1 | Keep: within 25% of 52-week high (laggard filter, not really N) |
+| N2 | Within **10%** of high (closer to IBD-style “near high” screens) |
+| N3 | Within **5%** of high (strict near-new-high) |
+| N4 | Compute high from daily bars (optionally merge Yahoo). Stack on N1/N2/N3 |
+| N5 | Pass only if last close is within X% **or** the 52-week high occurred in the last N days (recent new high) |
 
-**Recommended discussion:** N1 vs N2, optionally plus N4 as a data fix on top of whichever band you want.
+**Suggested default if we want N to mean N:** **N2 + N4** (10% band, high from daily data). Keep N1 only if you want a mild “not broken” check and are fine that most Nifty names always pass.
 
 ---
 
@@ -209,9 +233,10 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 ## Locked decisions (implement in the next scoring batch)
 
 - **C2** — already in production code.
+- **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”. Not shipped yet.
 
 ## Pending your reply
 
-- **A** — A1 / A2 / A3 / A4 / A5
-- **N, S, L, I, M** — pick IDs above or “keep”
+- **N** — N1 / N2 / N3, optionally + **N4** (daily high)
+- **S, L, I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
