@@ -151,7 +151,26 @@ Yahoo `floatShares` **was** present for 24/25 names here (Maruti ~116M vs HDFC B
 | **S4** | True-S supply proxy: float below a cap (only useful outside Nifty 50; threshold TBD) |
 | **S5** | Drop S from fundamentals; tightness already lives in T1/T2 |
 
-**Recommended:** **S1** (keep the chart test, relabel). Add **S1b** as a tiny missing-data fix. Do **not** switch to float (S4) for this product’s main indexes — it would just fail mega-caps. Pick **S3** only if you want S to mean accumulation rather than a tight base.
+**Would S3 be a good alternative?** **Yes**, if S is allowed to mean **demand (accumulation)**, not float. T1/T2 already score tightness, so keeping S1 would double-count a chart coil and still ignore volume.
+
+S3 is still only **half** of O’Neil S (demand, not small supply). That is the half we can measure on NSE Yahoo data. Relabel to volume/demand, not “tight base.”
+
+**Proposed spec (S3):** using daily bars, sum volume on days the **close is up** vs days the close is down. Pass if up-volume > down-volume. Skip if volume is missing or there are not enough bars. Unchanged closes are ignored (not counted as up or down).
+
+**Lookback on the same 24 names (Tata Motors skip):**
+
+| Rule | Pass | Fail | vs S1 |
+|---|---:|---:|---|
+| S1 tightness (current) | 20 | 4 | — |
+| **S3, 20 sessions, ratio > 1** | 10 | 14 | same on only 10/24 |
+| **S3, 50 sessions, ratio > 1** | 14 | 10 | same on 14/24 |
+| S3, 20 sessions, ratio > 1.2 | 6 | 18 | very strict |
+
+20 days is noisy (TCS fails 20d / passes 50d; Infosys and L&T the reverse). **50 sessions** is the better default: same length as the 50-DMA we already compute, less twitchy.
+
+Names tightness and volume **disagree** on (50d): Kotak and Titan **fail S1 / pass S3** (weak coil, but buyers have been more active). Reliance, ITC, L&T, Axis, NTPC, Power Grid **pass S1 / fail S3** (quiet near the 50-DMA, but more volume on down days).
+
+**Suggested lock:** **S3 with 50 trading days, pass if up-volume > down-volume, skip if volume/bars missing.** Keep T1/T2 as the tightness rules. Do not also keep S1.
 
 ---
 
@@ -263,6 +282,6 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 
 ## Pending your reply
 
-- **S** — S1 / S1b / S2 / S3 / S4 / S5
+- **S** — leaning **S3 (50d up/down volume)**; confirm lookback 20 vs 50
 - **L, I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
