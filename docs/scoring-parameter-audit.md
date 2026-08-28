@@ -222,6 +222,20 @@ So L1 is a **strict short-term momentum cut**, not “leader vs laggard.” In t
 
 **Your reading (overlap with RS) is right.** Classical L *is* relative strength vs the market. **RS1** is that measure (continuous). **RS2** is the same idea vs sector peers. A third “leader” check in the fundamental pillar either copies RS1 (L3) or uses the wrong tool (RSI). **Lean L4:** drop L from CANSLIM-7; keep leadership in the RS pillar.
 
+**Qualitative L (non-price)?** O’Neil did **not** mean “best company in the industry.” He warned against buying the laggard franchise that “should” catch up. True qualitative leadership (market share, category captain, new product that resets the industry) is **research**, not in Yahoo.
+
+What Yahoo *does* have on NSE (sample of 12): **sector/industry** always; **profit and operating margins** always; **ROE** only half the time. No market share, no “#1 in industry,” no product flag.
+
+Possible non-RS stand-ins (not classical L):
+
+| ID | Idea | Problem |
+|---|---|---|
+| L6 | Top-half **operating margin vs sector peers in this scan** | Quality/franchise, not leadership; banks vs NBFCs share one Yahoo sector |
+| L7 | Top-half **quarterly EPS growth vs sector peers** | Overlaps C; just C relative instead of absolute |
+| L8 | Manual / research toggle | Not a screener |
+
+Do not call margin rank “CANSLIM L.” Prefer **L4**, or a separately named quality-vs-peers rule (**L6**).
+
 ---
 
 ## I — Institutional sponsorship
@@ -310,6 +324,6 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 
 ## Pending your reply
 
-- **L** — leaning **L4** (drop; RS1/RS2 already cover leadership); confirm
+- **L** — leaning **L4**; qualitative alternatives L6/L7/L8 discussed; confirm
 - **I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
