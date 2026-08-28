@@ -180,7 +180,7 @@ You chose 20 days over 50 knowing it is jumpy. On the sample that is **10 pass /
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: L9a — fold RS into L, drop RS pillar. Not in code yet (batch)** |
 | Sidebar / UG | Leader RS: Daily RSI > 55 |
 | **Code (L1)** | 14-day RSI of daily close > 55. Skip if < 14 bars or RSI is NaN. |
 
@@ -258,7 +258,7 @@ Yes, that is coherent. RS1/RS2 **are** CANSLIM L with extra UI. A third pillar e
 
 Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
 
-**Lean: L9a — not locked.**
+**Agreed (L9a) — not in code yet (batch):** Drop the RS pillar and the RS weight slider. Two pillars only: Fundamental and Technical. L is no longer RSI. It becomes two fundamental ticks with the old RS math: **L vs Nifty** (63-day return > Nifty) and **L vs sector** (63-day return > sector peers in this scan; skip if no sector). Breakdown still shows the percentages. T1–T10 remain chart/trend confirmation; they do not compare the stock to Nifty or peers.
 
 ---
 
@@ -345,9 +345,9 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 - **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”.
 - **N2 + N4** — within 10% of 52-week high; high from daily bars (merge Yahoo if present).
 - **S3 (20 trading days)** — up-volume > down-volume; skip if missing; relabel demand. Tightness stays T1/T2.
+- **L9a** — drop RS pillar; L vs Nifty and L vs sector (63-day returns); skip sector if unknown; show % in breakdown only.
 
 ## Pending your reply
 
-- **L / RS pillar** — leaning **L9a** (fold RS1+RS2 into L as two fund ticks; drop third pillar); confirm L9a / L9b / L4
 - **I, M** — pick IDs or “keep”
-- Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
+- Then **T1–T10** (same file, still one implementation drop)
