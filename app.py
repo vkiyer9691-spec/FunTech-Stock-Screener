@@ -117,7 +117,7 @@ def _apply_page_chrome():
 # ----------------------------------------------------------------------------------
 BENCHMARK = "^NSEI"
 DEFAULT_FUND_PARAMS = {
-    "C": "C: Current EPS Growth > 15%",
+    "C": "C: Current quarterly EPS vs same quarter last year > 15%",
     "A": "A: Annual Revenue Growth > 10%",
     "N": "N: Near 52-Week High (within 25%)",
     "S": "S: Supply/Demand (Tight Base Consolidation)",
@@ -142,7 +142,7 @@ DEFAULT_RS_PARAMS = {
     "RS2": "RS2: Sector Peer Relative Strength",
 }
 FUND_HELP = {
-    "C": "On: the stock must show quarterly EPS growth above 15% year on year to earn this point. Off: this rule is ignored in the fundamental score.",
+    "C": "On: latest-quarter diluted EPS (else net income) must be more than 15% above the same quarter last year. Yahoo’s annual growth rate is not used. Off: this rule is ignored.",
     "A": "On: annual revenue growth must be above 10%. Off: sales growth is not part of the fundamental score.",
     "N": "On: price must sit within 25% of the 52-week high. Off: proximity to highs is ignored.",
     "S": "On: recent price action must look like a tight base (low volatility near the 50-DMA). Off: base tightness is ignored.",
@@ -938,6 +938,19 @@ def fetch_info(ticker: str) -> dict:
             pass
         try:
             q_fin = t.quarterly_financials
+            q_inc = None
+            try:
+                q_inc = t.quarterly_income_stmt
+            except Exception:
+                q_inc = None
+            default_info["quarterly_eps_yoy"] = _yoy_latest_vs_year_ago(
+                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
+                ["diluted eps", "diluted earnings per share", "basic eps", "eps"],
+            )
+            default_info["quarterly_ni_yoy"] = _yoy_latest_vs_year_ago(
+                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
+                ["net income"],
+            )
             if q_fin is not None and not q_fin.empty:
                 rev_row = next((r for r in q_fin.index if "total revenue" in str(r).lower() or "revenue" in str(r).lower()), None)
                 ni_row = next((r for r in q_fin.index if "net income" in str(r).lower()), None)
@@ -1167,6 +1180,38 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
     hist = macd_line - signal_line
     return pd.DataFrame({"MACD": macd_line, "MACDh": hist, "MACDs": signal_line})
 
+def _yoy_latest_vs_year_ago(df: pd.DataFrame | None, needles: list[str]) -> float | None:
+    """(latest quarter − quarter ~1y ago) / |year-ago|, Yahoo columns newest-first."""
+    if df is None or getattr(df, "empty", True) or getattr(df, "shape", (0, 0))[1] < 5:
+        return None
+    row = None
+    for needle in needles:
+        for idx in df.index:
+            if needle in str(idx).lower():
+                row = idx
+                break
+        if row is not None:
+            break
+    if row is None:
+        return None
+    cur, yoy = df.loc[row].iloc[0], df.loc[row].iloc[4]
+    if yoy in (0, None) or pd.isna(yoy) or pd.isna(cur):
+        return None
+    try:
+        return float((float(cur) - float(yoy)) / abs(float(yoy)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def canslim_c_growth(info: dict) -> float | None:
+    """C2: quarterly YoY. Prefer diluted EPS; else net income. Ignore annual earningsGrowth."""
+    for key in ("quarterly_eps_yoy", "quarterly_ni_yoy"):
+        val = info.get(key)
+        if val is not None and pd.notna(val):
+            return float(val)
+    return None
+
+
 def slope_up(series: pd.Series, lookback: int = 5) -> bool:
     s = series.dropna()
     return len(s) >= lookback + 1 and bool(s.iloc[-1] > s.iloc[-(lookback + 1)])
@@ -1178,7 +1223,7 @@ def is_rising(series: pd.Series, lookback: int = 2) -> bool:
 def compute_fundamental_score(info: dict, daily: pd.DataFrame, bench_daily: pd.DataFrame):
     raw_results = {}
     valid_metrics = {}
-    eps_growth = info.get("earningsGrowth") or info.get("earningsQuarterlyGrowth")
+    eps_growth = canslim_c_growth(info)
     if eps_growth is not None and pd.notna(eps_growth):
         raw_results["C"] = bool(eps_growth > 0.15)
         valid_metrics["C"] = True
@@ -2277,7 +2322,7 @@ def _run_streamlit_ui():
             st.markdown("#### **Pillar 1: Fundamental Rules (CANSLIM-7)**")
             st.markdown(
                 """
-                * **C - Current EPS:** Quarterly EPS growth > 15% YoY.
+                * **C - Current EPS:** Latest quarter vs same quarter last year; diluted EPS preferred, else net income; skip if missing. Pass if growth > 15%.
                 * **A - Annual Revenue:** Quarterly revenue growth > 10% YoY.
                 * **N - Near 52W High:** Current price within 25% of 52-week high.
                 * **S - Base Tightness:** 10-day volatility $\le 6\%$ and price near 50 DMA.
