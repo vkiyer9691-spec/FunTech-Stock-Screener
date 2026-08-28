@@ -445,8 +445,33 @@ def send_email(to_addr: str, subject: str, html: str) -> str:
     return "sent"
 
 
-def _universe_tickers(quick: bool) -> dict[str, list]:
+def _screener_mod():
+    """The scoring module Streamlit already loaded, or a fresh import of app.py.
+
+    `streamlit run app.py` executes the file as `__main__`. A second `import app`
+    can bind a half-initialized module (circular import) that is missing
+    `set_score_overrides`, which is what Show top scores hits.
+    """
+    import sys
+
+    needed = (
+        "set_score_overrides",
+        "execute_scan",
+        "UNIVERSE_SOURCE_OPTIONS",
+        "FALLBACK_INDEX_LISTS",
+        "load_fo_stocks",
+        "load_index_list",
+    )
+    for name in ("__main__", "app"):
+        mod = sys.modules.get(name)
+        if mod is not None and all(hasattr(mod, attr) for attr in needed):
+            return mod
     import app as screener
+    return screener
+
+
+def _universe_tickers(quick: bool) -> dict[str, list]:
+    screener = _screener_mod()
 
     names = QUICK_UNIVERSES if quick else list(screener.UNIVERSE_SOURCE_OPTIONS)
     out = {}
@@ -494,7 +519,7 @@ def run_digest(
 
     universe_map = _universe_tickers(quick=quick)
     all_tickers = list(dict.fromkeys(t for lst in universe_map.values() for t in lst))
-    import app as screener
+    screener = _screener_mod()
 
     subject = f"{DIGEST_TITLE} — {generated_at.strftime('%d %b %Y')}"
     deliveries = []

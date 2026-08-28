@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from digest import (
+    _screener_mod,
     clamp_pillar_weights,
     extra_recipients_from_env,
     extract_email_address,
@@ -163,6 +164,21 @@ class DigestTests(unittest.TestCase):
             self.assertIn("noreply@funtech.invalid", smtp_reply_to_header())
         with patch.dict(os.environ, {"SMTP_REPLY_TO": "off"}, clear=False):
             self.assertEqual(smtp_reply_to_header(), "")
+
+    def test_screener_mod_uses_complete_main_not_stub_app(self):
+        import sys
+        import types
+
+        stub = types.ModuleType("app")
+        complete = types.ModuleType("__main__")
+        complete.set_score_overrides = lambda _x: None
+        complete.execute_scan = lambda *_a, **_k: (None, [])
+        complete.UNIVERSE_SOURCE_OPTIONS = ["Nifty 50"]
+        complete.FALLBACK_INDEX_LISTS = {}
+        complete.load_fo_stocks = lambda: []
+        complete.load_index_list = lambda _n: []
+        with patch.dict(sys.modules, {"__main__": complete, "app": stub}):
+            self.assertIs(_screener_mod(), complete)
 
 
 if __name__ == "__main__":
