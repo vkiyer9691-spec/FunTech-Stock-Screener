@@ -614,7 +614,7 @@ def render_login_screen():
         email = st.text_input(
             "Email",
             key="auth_email",
-            help="The address used for this account and, if you opt in, weekday morning scores.",
+            help="The address used for this account and, if you opt in, the daily top-scores email.",
         )
         password = st.text_input(
             "Password",
@@ -627,7 +627,7 @@ def render_login_screen():
                 "Log In",
                 use_container_width=True,
                 type="primary",
-                help="Sign in and load your saved weights, rules, and morning-scores preference.",
+                help="Sign in and load your saved weights, rules, and top-scores email preference.",
             ):
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -980,7 +980,7 @@ def customize_fundamental_modal():
             st.session_state[f"fund_{k}"] = True
         save_user_settings_to_db()
         st.rerun()
-    if col2.button("Apply & Save", key="apply_fund", help="Store these toggles for scans and the weekday morning scores email."):
+    if col2.button("Apply & Save", key="apply_fund", help="Store these toggles for scans and the daily top-scores email."):
         save_user_settings_to_db()
         st.rerun()
 @st.dialog("⚙️ Customize Technical Parameters")
@@ -998,19 +998,45 @@ def customize_technical_modal():
             st.session_state[f"tech_{k}"] = True
         save_user_settings_to_db()
         st.rerun()
-    if col2.button("Apply & Save", key="apply_tech", help="Store these toggles for scans and the weekday morning scores email."):
+    if col2.button("Apply & Save", key="apply_tech", help="Store these toggles for scans and the daily top-scores email."):
         save_user_settings_to_db()
         st.rerun()
 
-@st.dialog("FunTech daily morning scores", width="large")
+@st.dialog("Top scores", width="large")
 def show_digest_preview_modal(preview: dict):
+    from digest import tradingview_watchlist
+
     st.caption(
         f"Scored {preview.get('ticker_count', 0)} unique tickers. "
-        "This window is a one-time preview — it will not stay on the screener, portfolio, or other tabs."
+        "This window stays open so you can copy the TradingView list. Close it with Done when you are finished."
     )
-    st.components.v1.html(preview.get("html") or "", height=640, scrolling=True)
+    st.components.v1.html(preview.get("html") or "", height=480, scrolling=True)
     if preview.get("outbox_path"):
         st.caption(f"Also saved to `{preview.get('outbox_path')}`.")
+
+    st.subheader("📈 TradingView")
+    st.caption(
+        "Copies the top names from every index/group in this preview "
+        "(Nifty 50, Next 50, Midcap, Smallcap, Nifty 500, F&O — whichever were scored). "
+        "A stock that appears in more than one list is included once. Same NSE:SYMBOL paste as the screener."
+    )
+    threshold = st.slider(
+        "Min Score Filter",
+        0.0,
+        10.0,
+        0.0,
+        0.5,
+        key="digest_tv_thresh",
+        help="Only names with Total at or above this value are listed for the TradingView paste. Does not change the tables above.",
+    )
+    tv_content = tradingview_watchlist(preview.get("sections") or [], min_score=threshold)
+    tv_symbols = [part for part in tv_content.split(",") if part] if tv_content else []
+    st.write(f"**{len(tv_symbols)} unique tickers** across all lists (score ≥ {threshold:.1f}). Copy below ➡️")
+    if tv_symbols:
+        st.code(tv_content, language="text")
+    else:
+        st.info("No tickers match this score threshold.")
+
     if st.button("Done", type="primary", use_container_width=True, help="Close this preview. It will not appear again until you generate a new one."):
         st.session_state["digest_preview_open"] = False
         st.rerun()
@@ -1542,10 +1568,10 @@ def _run_streamlit_ui():
         customize_technical_modal()
 
     st.sidebar.divider()
-    st.sidebar.subheader("Daily morning scores")
+    st.sidebar.subheader("Top scores")
     st.sidebar.caption(
-        "Weekdays at 8:30 AM IST — score ranking for each index/group before the cash market opens at 9:15. "
-        "Uses your pillar weights and which rules you have turned on. Not a stock pick or recommendation."
+        "Sent once every day. Uses your pillar weights and which rules you have turned on. "
+        "Not a stock pick or recommendation."
     )
 
     def _snapshot_engine():
@@ -1576,10 +1602,10 @@ def _run_streamlit_ui():
         _persist_digest_pref()
 
     st.sidebar.checkbox(
-        "Email me weekday morning scores",
+        "Email me top scores",
         key="digest_opt_in",
         on_change=_on_digest_pref_change,
-        help="Emails the highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
+        help="This is sent once every day. Highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
     )
     st.sidebar.number_input(
         "Number of stocks per group/index",
@@ -1588,7 +1614,7 @@ def _run_streamlit_ui():
         step=1,
         key="digest_top_n",
         on_change=_on_digest_pref_change,
-        help="How many highest-scoring tickers to list under each index or F&O group in the weekday email (3–25).",
+        help="How many highest-scoring tickers to list under each index or F&O group (3–25).",
     )
     digest_quick = st.sidebar.checkbox(
         "Quick preview (Nifty 50 + Next 50 fallback lists)",
@@ -1597,12 +1623,12 @@ def _run_streamlit_ui():
         help="Uncheck to score every live universe. That can take several minutes.",
     )
     if st.sidebar.button(
-        "📬 Generate preview digest",
+        "Show top scores",
         use_container_width=True,
-        help="Score the selected lists and open a one-time preview window. It will not stay on other tabs.",
+        help="Score the selected lists and open a one-time preview, including a TradingView copy of the top names across all indices.",
     ):
         from digest import run_digest, is_smtp_configured
-        with st.spinner("Scoring universes for the morning email..."):
+        with st.spinner("Scoring universes..."):
             digest_result = run_digest(
                 quick=bool(digest_quick),
                 send=False,
@@ -1614,7 +1640,7 @@ def _run_streamlit_ui():
         st.session_state["digest_preview"] = digest_result
         st.session_state["digest_preview_open"] = digest_result.get("status") == "ok"
         if digest_result.get("status") == "ok":
-            st.sidebar.success("Preview opened. Close it when you are done — it will not follow you to other tabs.")
+            st.sidebar.success("Preview opened. Copy the TradingView list there, then click Done.")
         else:
             st.sidebar.warning(digest_result.get("status"))
 
@@ -1627,7 +1653,7 @@ def _run_streamlit_ui():
         ):
             from digest import send_email
             html = st.session_state["digest_preview"].get("html") or ""
-            status = send_email(user_email, "FunTech daily morning scores (preview)", html)
+            status = send_email(user_email, "FunTech top scores (preview)", html)
             if status == "sent":
                 st.sidebar.success(f"Sent to {user_email}")
             else:
@@ -1637,11 +1663,9 @@ def _run_streamlit_ui():
     # Dynamic Navigation Tabs
 
     # ----------------------------------------------------------------------------------
-    # Preview is a one-shot dialog: show it, then drop the flag so a later tab
-    # click or other widget rerun cannot paint the scores on the page again.
+    # Keep the preview dialog open until Done so the TradingView slider can rerun.
     if st.session_state.get("digest_preview_open") and st.session_state.get("digest_preview"):
         show_digest_preview_modal(st.session_state["digest_preview"])
-        st.session_state["digest_preview_open"] = False
 
     tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
     if user_is_admin:
@@ -2257,7 +2281,7 @@ def _run_streamlit_ui():
             * **Adjust Weights:** Slide **Fundamental Weight** or **Technical Weight**. They always add to **10** — moving one fills the remainder on the other.
             * **Customize Rules:** Click **Fundamental Rules** or **Technical Rules** in the sidebar to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
-            * **Morning email:** Check **Email me weekday morning scores** in the sidebar. At 8:30 AM IST on weekdays the job emails (or writes) the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Generate preview digest** to try it now. This is a score ranking, not a stock pick.
+            * **Top scores email:** Check **Email me top scores** in the sidebar. This is sent once every day with the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Show top scores** to preview now — the preview also has a TradingView copy of the unique top names across all lists. This is a score ranking, not a stock pick.
             """
         )
         st.markdown("#### **4. Export to TradingView**")
@@ -2266,6 +2290,7 @@ def _run_streamlit_ui():
             * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to 7.0 or higher for top candidates).
             * **Step B (Copy Formatted Strings):** Click the copy icon in the formatted code snippet box (e.g., `NSE:TRENT,NSE:HAL,NSE:TATAMOTORS`).
             * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously.
+            * **Top scores preview:** After **Show top scores**, the same NSE:SYMBOL paste is available for the unique top names across every index that was scored.
             """
         )
         st.divider()

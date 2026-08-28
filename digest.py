@@ -1,4 +1,4 @@
-"""Weekday email of daily morning scores per NSE index/group.
+"""Daily email of top scores per NSE index/group.
 
 Local preview writes HTML under digest_outbox/. Real SMTP send is optional
 and skipped when SMTP_* is not configured.
@@ -28,7 +28,7 @@ QUICK_UNIVERSES = ["Nifty 50", "Nifty Next 50"]
 DEFAULT_TOP_N = 10
 DEFAULT_WEIGHTS = (5, 5)
 DEFAULT_FROM_NAME = "FunTech Screener"
-DIGEST_TITLE = "FunTech daily morning scores"
+DIGEST_TITLE = "FunTech top scores"
 # Reserved .invalid TLD — replies bounce instead of landing in SMTP_FROM.
 DEFAULT_REPLY_TO_ADDR = "noreply@funtech.invalid"
 
@@ -300,6 +300,34 @@ def list_subscribers() -> list[dict]:
     return subs
 
 
+def tradingview_symbols(sections: list[dict], min_score: float = 0.0) -> list[str]:
+    """Unique NSE:TICKER strings from top-score rows, highest Total Score first.
+
+    A name that ranks in more than one index (e.g. Nifty 50 and Nifty 500) appears once.
+    """
+    best: dict[str, float] = {}
+    for sec in sections or []:
+        for row in sec.get("rows") or []:
+            ticker = row.get("Ticker")
+            if not ticker:
+                continue
+            try:
+                score = float(row.get("Total Score") or 0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score < float(min_score):
+                continue
+            prev = best.get(ticker)
+            if prev is None or score > prev:
+                best[ticker] = score
+    ordered = sorted(best.items(), key=lambda item: item[1], reverse=True)
+    return [f"NSE:{ticker.replace('.NS', '')}" for ticker, _score in ordered]
+
+
+def tradingview_watchlist(sections: list[dict], min_score: float = 0.0) -> str:
+    return ",".join(tradingview_symbols(sections, min_score))
+
+
 def rank_universes(results_df: pd.DataFrame, universe_map: dict[str, list], top_n: int) -> list[dict]:
     sections = []
     if results_df is None or results_df.empty:
@@ -366,7 +394,7 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
 <html><head><meta charset="utf-8"><title>{DIGEST_TITLE}</title></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#111">
   <h1>{DIGEST_TITLE}</h1>
-  <p>Highest-scoring {top_n} stocks in each NSE index/group, scored with your current screener settings. This is a ranking of scores, not a stock pick or recommendation.</p>
+  <p>Highest-scoring {top_n} stocks in each NSE index/group, scored with your current screener settings. This is a ranking of scores, not a stock pick or recommendation. Sent once every day.</p>
   <p>{settings_line}</p>
   <p><strong>Generated:</strong> {when}</p>
   {''.join(blocks)}

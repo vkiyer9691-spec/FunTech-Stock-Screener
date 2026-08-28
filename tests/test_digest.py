@@ -17,6 +17,7 @@ from digest import (
     smtp_from_parts,
     smtp_reply_to_header,
     subscriber_from_settings_row,
+    tradingview_watchlist,
     weighted_total,
 )
 
@@ -47,6 +48,30 @@ class DigestTests(unittest.TestCase):
         nxt = next(s for s in sections if s["universe"] == "Nifty Next 50")
         self.assertEqual(nxt["rows"][0]["Ticker"], "DDD.NS")
 
+    def test_tradingview_watchlist_uniques_across_indices(self):
+        sections = [
+            {
+                "universe": "Nifty 50",
+                "rows": [
+                    {"Ticker": "AAA.NS", "Total Score": 9.1},
+                    {"Ticker": "BBB.NS", "Total Score": 8.2},
+                ],
+            },
+            {
+                "universe": "Nifty Next 50",
+                "rows": [
+                    {"Ticker": "DDD.NS", "Total Score": 9.9},
+                    {"Ticker": "AAA.NS", "Total Score": 9.1},
+                ],
+            },
+        ]
+        self.assertEqual(
+            tradingview_watchlist(sections),
+            "NSE:DDD,NSE:AAA,NSE:BBB",
+        )
+        self.assertEqual(tradingview_watchlist(sections, min_score=9.0), "NSE:DDD,NSE:AAA")
+        self.assertEqual(tradingview_watchlist(sections, min_score=9.5), "NSE:DDD")
+
     def test_html_contains_universes(self):
         sections = [{
             "universe": "Nifty 50",
@@ -62,7 +87,8 @@ class DigestTests(unittest.TestCase):
         html = render_html(sections, datetime(2026, 8, 27, 8, 30, tzinfo=IST), 10)
         self.assertIn("Nifty 50", html)
         self.assertIn("RELIANCE.NS", html)
-        self.assertIn("FunTech daily morning scores", html)
+        self.assertIn("FunTech top scores", html)
+        self.assertIn("Sent once every day", html)
         self.assertIn("not a stock recommendation", html.lower())
         self.assertIn("consult your financial advisor", html.lower())
         self.assertIn("user-selected settings and weightages", html.lower())

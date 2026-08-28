@@ -17,7 +17,7 @@ from digest import DEFAULT_TOP_N, run_digest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="FunTech daily morning scores")
+    parser = argparse.ArgumentParser(description="FunTech top scores")
     parser.add_argument("--preview", action="store_true", help="Write HTML to digest_outbox/ (default if --send is omitted)")
     parser.add_argument("--send", action="store_true", help="Email opted-in subscribers when SMTP is configured")
     parser.add_argument("--quick", action="store_true", help="Nifty 50 + Next 50 fallback lists only (fast local preview)")
