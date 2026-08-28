@@ -66,7 +66,7 @@ A2 is consistent with C2. It is still **sales**, not copybook A (annual EPS).
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: N2 + N4 — not in code yet (batch)** |
 | Sidebar / UG | Near 52-week high (within 25%) |
 | Classic N | See below. Quantitative half = **new price highs**, not “25% off the high”. |
 | **Code (N1)** | `currentPrice` (Yahoo fast_info / info) or last close ≥ **75%** of Yahoo `fiftyTwoWeekHigh`. Skip if high or price missing. |
@@ -104,29 +104,54 @@ So 25% passes **~4 in 5** large caps; 10% passes **~1 in 3**; 5% is a true “ne
 | N4 | Compute high from daily bars (optionally merge Yahoo). Stack on N1/N2/N3 |
 | N5 | Pass only if last close is within X% **or** the 52-week high occurred in the last N days (recent new high) |
 
-**Suggested default if we want N to mean N:** **N2 + N4** (10% band, high from daily data). Keep N1 only if you want a mild “not broken” check and are fine that most Nifty names always pass.
+**Agreed:** **N2 + N4** — last close within **10%** of the 52-week high, high = max of Yahoo (if present) and the last ~252 daily highs. Relabel off “within 25%”.
 
 ---
 
-## S — Supply / demand (tight base)
+## S — Supply and demand
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not locked |
+| **Status** | Open — discussed; not locked |
 | Sidebar | Supply/Demand (Tight Base Consolidation) |
-| Help / UG | 10-day volatility ≤ 6% **and** price near 50-DMA (code uses **within 5%** of 50-DMA) |
-| Classic S | Small float / limited supply; demand showing in volume. Tightness is more of a chart setup. |
-| **Code** | Needs ≥ 50 daily bars. `vol = std(close[-10]) / mean(close[-10]) * 100 ≤ 6` **and** `|close − SMA50| / SMA50 * 100 ≤ 5`. Skip if < 50 bars. Evaluated even if SMA50 is NaN (`near_50` becomes 99 → fail). |
+| Help / UG | 10-day volatility ≤ 6% **and** price near 50-DMA (code: within **5%** of 50-DMA) |
+| **Code (S1)** | Needs ≥ 50 daily bars. Pass if 10-day close std/mean ≤ 6% **and** \|close − SMA50\| / SMA50 ≤ 5%. Skip if < 50 bars. If SMA50 is NaN, distance is set to 99 → **fail** (not skip). |
+
+**What O’Neil’s S actually is**
+
+S is **Supply and Demand**. He wanted **limited supply** (smaller float / fewer shares out, buybacks, big insider ownership) so that **institutional demand** could lift the price. Demand shows up as **volume**: heavier volume on up days than down days (accumulation), not a quiet, low-volatility coil. A huge share count or a dilutive offering is a negative.
+
+A **tight base** (narrow price, low vol, coiled near MAs) is a real O’Neil chart idea, but it belongs with the **buy point / N**, not with the letter S. Our label mixes the two.
+
+**What the code does**
+
+It is a **tightness + “hugging the 50-DMA”** test. It does not use float, share count, buybacks, or up/down volume. It overlaps **T1** (near 50-DMA) and **T2** (tight coil near 50/20-DMA).
+
+On the first 25 Nifty 50 names (28 Aug 2026 daily bars):
+
+| Check | Pass | Fail | Skip |
+|---|---:|---:|---:|
+| **S1 (vol ≤ 6% and within 5% of 50-DMA)** | 20 | 4 | 1 |
+| 10-day vol ≤ 6% alone | 24 | 0 | 1 |
+| Within 5% of 50-DMA alone | 20 | 4 | 1 |
+| Same but vol ≤ 4% | 20 | 4 | 1 |
+
+The vol ≤ 6% clause **never failed** this sample (highest 10-day vol was Kotak ~3.4%). Every S1 fail was **distance from the 50-DMA**: HDFC Bank 6.5%, HUL 5.1%, Kotak 8.2%, Titan 8.2%. Tata Motors skip (no Yahoo daily).
+
+Yahoo `floatShares` **was** present for 24/25 names here (Maruti ~116M vs HDFC Bank ~15B). A true small-float rule would still fail almost all Nifty 50 names; it would only start to matter in small/midcap scans.
 
 **Options**
 
 | ID | Rule |
 |---|---|
-| S1 | Keep current tightness rule (label already says base, not float) |
-| S2 | Keep tightness; skip (don’t fail) when SMA50 is missing |
-| S3 | Something else you specify (float is not in Yahoo reliably for NSE) |
+| **S1** | Keep current: vol ≤ 6% and within 5% of 50-DMA. Honest label: tight base, not supply/demand |
+| **S1b** | S1 plus skip (don’t fail) when SMA50 is missing |
+| **S2** | Drop the inert vol clause; pass iff within 5% of 50-DMA (same Nifty 50 result as S1 today) |
+| **S3** | True-S demand proxy: last 20 sessions’ up-volume > down-volume. Different names will pass |
+| **S4** | True-S supply proxy: float below a cap (only useful outside Nifty 50; threshold TBD) |
+| **S5** | Drop S from fundamentals; tightness already lives in T1/T2 |
 
-**Recommended:** S1 behavior, S2 as a small missing-data fix aligned with C/A.
+**Recommended:** **S1** (keep the chart test, relabel). Add **S1b** as a tiny missing-data fix. Do **not** switch to float (S4) for this product’s main indexes — it would just fail mega-caps. Pick **S3** only if you want S to mean accumulation rather than a tight base.
 
 ---
 
@@ -233,10 +258,11 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 ## Locked decisions (implement in the next scoring batch)
 
 - **C2** — already in production code.
-- **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”. Not shipped yet.
+- **A2** — quarterly Total Revenue YoY; skip if missing; relabel off “Annual”.
+- **N2 + N4** — within 10% of 52-week high; high from daily bars (merge Yahoo if present).
 
 ## Pending your reply
 
-- **N** — N1 / N2 / N3, optionally + **N4** (daily high)
-- **S, L, I, M** — pick IDs or “keep”
+- **S** — S1 / S1b / S2 / S3 / S4 / S5
+- **L, I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
