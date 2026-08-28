@@ -1016,26 +1016,17 @@ def show_digest_preview_modal(preview: dict):
 
     st.subheader("📈 TradingView")
     st.caption(
-        "Copies the top names from every index/group in this preview "
+        "Every top-score name from all index/group lists in this preview "
         "(Nifty 50, Next 50, Midcap, Smallcap, Nifty 500, F&O — whichever were scored). "
-        "A stock that appears in more than one list is included once. Same NSE:SYMBOL paste as the screener."
+        "A stock that appears in more than one list is included once. Copy the NSE:SYMBOL string into TradingView."
     )
-    threshold = st.slider(
-        "Min Score Filter",
-        0.0,
-        10.0,
-        0.0,
-        0.5,
-        key="digest_tv_thresh",
-        help="Only names with Total at or above this value are listed for the TradingView paste. Does not change the tables above.",
-    )
-    tv_content = tradingview_watchlist(preview.get("sections") or [], min_score=threshold)
+    tv_content = tradingview_watchlist(preview.get("sections") or [])
     tv_symbols = [part for part in tv_content.split(",") if part] if tv_content else []
-    st.write(f"**{len(tv_symbols)} unique tickers** across all lists (score ≥ {threshold:.1f}). Copy below ➡️")
+    st.write(f"**{len(tv_symbols)} unique tickers** across all lists. Copy below ➡️")
     if tv_symbols:
         st.code(tv_content, language="text")
     else:
-        st.info("No tickers match this score threshold.")
+        st.info("No top-score tickers to copy.")
 
     if st.button("Done", type="primary", use_container_width=True, help="Close this preview. It will not appear again until you generate a new one."):
         st.session_state["digest_preview_open"] = False
@@ -2290,7 +2281,7 @@ def _run_streamlit_ui():
             * **Step A (Set Minimum Threshold):** Adjust the score slider (e.g., set to 7.0 or higher for top candidates).
             * **Step B (Copy Formatted Strings):** Click the copy icon in the formatted code snippet box (e.g., `NSE:TRENT,NSE:HAL,NSE:TATAMOTORS`).
             * **Step C (Import to TradingView):** Open TradingView -> Create New Watchlist -> Click **+ Add Symbol** -> Paste directly to add all stocks simultaneously.
-            * **Top scores preview:** After **Show top scores**, the same NSE:SYMBOL paste is available for the unique top names across every index that was scored.
+            * **Top scores preview:** After **Show top scores**, copy the NSE:SYMBOL list of every unique top name across all scored indices (no score cutoff).
             """
         )
         st.divider()
