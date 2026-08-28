@@ -266,7 +266,7 @@ Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: I1 — not in code yet (batch)** |
 | Sidebar / UG | Institutional ownership > 30% |
 | Help | Data is often missing |
 | **Code (I1)** | Yahoo `heldPercentInstitutions` > 0.30. Skip if missing. |
@@ -300,7 +300,7 @@ So I today is closer to “**not promoter-dominated**” than to “has institut
 | I4 | Pass if institutions > **10%** (has some sponsorship; almost all Nifty pass) |
 | I5 | Pass if institutions > 30% **of float** (needs float + outstanding; definitions often disagree) |
 
-**Recommended:** **I1** if you want a filter that actually says yes/no and you accept it favours widely held / bank-like cap tables. **I3** if you do not want to fail TCS/Reliance/HUL for being promoter-led. I would not use I2. I4 makes I almost always pass, so it is clutter. We cannot do O’Neil’s “funds are adding” without another data source.
+**Agreed (I1) — not in code yet (batch):** Keep Yahoo institutions > 30% of outstanding; skip if missing. Relabel help so it does not say “data is often missing.” Accept promoter-led tilt: this is one dimension of a strength score, not a go/no-go veto; users can disable I or raise technical weight.
 
 ---
 
@@ -308,21 +308,33 @@ So I today is closer to “**not promoter-dominated**” than to “has institut
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not locked |
+| **Status** | Open — discussed; not locked |
 | Sidebar / UG | Nifty 50 above its 200-DMA |
-| Classic M | Don’t fight the general market; often index vs 50/200-DMA plus distribution days |
-| **Code** | `^NSEI` last close > SMA200. Skip if < 200 bars. **Same pass/fail for every stock in a scan.** |
-| Notes | When M fails, every name loses the same fundamental point. When it passes, everyone gets it. It does not rank stocks; it times the tape. |
+| **Code (M1)** | `^NSEI` last close > SMA200. Skip if < 200 bars. **Same pass/fail for every stock in a scan.** |
+
+**What O’Neil’s M actually is**
+
+M is **Market direction**: most stocks follow the general market, so he did not want you buying (or staying full) in a confirmed downtrend. Classic checks include the index vs 50/200-DMA and distribution days. It is a **tape / timing** rule, not a company attribute.
+
+**What the code does**
+
+One Nifty test, copied onto every row. If Nifty is above the 200-DMA, **every** name gets M. If not, **every** name fails M. It does **not** rank Reliance vs TCS.
+
+On 28 Aug 2026, Nifty was about **2% below** its 200-DMA (and the 200-DMA was not rising). So in a scan today **M fails for the entire universe**.
+
+**Why that matters for a strength screener**
+
+Failing M lowers everyone’s fundamental score by the same fraction (one fewer pass in the same denominator). **Rank order among stocks does not change.** What changes is the **absolute** number (e.g. 6.8 vs 7.7), which matters if you use a cutoff or compare scores across different market days.
 
 **Options**
 
 | ID | Rule |
 |---|---|
-| M1 | Keep Nifty > 200-DMA |
-| M2 | Nifty > 200-DMA **and** 200-DMA sloping up (5 bars), like T4 |
-| M3 | Drop M from per-stock score; show market regime as a banner only |
+| **M1** | Keep Nifty > 200-DMA on every stock. Absolute scores move with the tape; ranking does not |
+| M2 | Also require the 200-DMA sloping up over 5 bars (stricter; still the same for every name) |
+| **M3** | Do not put M in the per-stock score. Show “Nifty vs 200-DMA” once as a banner / digest header |
 
-**Recommended:** M1 unless you want M to be stricter (M2) or informational (M3).
+**Recommended given your I comment (strength score, not veto):** **M3** is the cleaner fit — market regime is context, not a fake stock-level tick. **M1** is fine if you *want* the printed score to be softer in a down tape so a “7” in a bull market is not the same as a “7” in a bear. M2 is still universe-wide, just harder.
 
 ---
 
@@ -365,8 +377,9 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 - **N2 + N4** — within 10% of 52-week high; high from daily bars (merge Yahoo if present).
 - **S3 (20 trading days)** — up-volume > down-volume; skip if missing; relabel demand. Tightness stays T1/T2.
 - **L9a** — drop RS pillar; L vs Nifty and L vs sector (63-day returns); skip sector if unknown; show % in breakdown only.
+- **I1** — Yahoo institutions > 30%; skip if missing; keep as one optional dimension.
 
 ## Pending your reply
 
-- **I** — I1 / I3 (recommended fork); I2 / I4 / I5 also listed
-- Then **T1–T10** (same file, still one implementation drop)
+- **M** — M1 / M2 / **M3** (banner; fits a rank-style screener)
+- Then **T1–T10**
