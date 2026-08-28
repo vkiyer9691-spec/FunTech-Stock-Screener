@@ -376,9 +376,9 @@ def is_admin(user) -> bool:
 
 def init_session_defaults():
     if "w_fund" not in st.session_state:
-        st.session_state["w_fund"] = 4
+        st.session_state["w_fund"] = 5
     if "w_tech" not in st.session_state:
-        st.session_state["w_tech"] = 4
+        st.session_state["w_tech"] = 5
     for k in DEFAULT_FUND_PARAMS:
         if f"fund_{k}" not in st.session_state:
             st.session_state[f"fund_{k}"] = True
@@ -401,9 +401,11 @@ def load_user_settings_from_db(user_id: str):
             supabase.postgrest.auth(session.access_token)
         response = supabase.table("user_settings").select("*").eq("user_id", user_id).execute()
         if response.data and len(response.data) > 0:
+            from digest import clamp_pillar_weights
             data = response.data[0]
-            st.session_state["w_fund"] = int(data.get("w_fund", 4))
-            st.session_state["w_tech"] = int(data.get("w_tech", 4))
+            w_f, w_t = clamp_pillar_weights(data.get("w_fund", 5), data.get("w_tech", 5))
+            st.session_state["w_fund"] = w_f
+            st.session_state["w_tech"] = w_t
             
             fund_rules = data.get("fund_rules") or {}
             for k in DEFAULT_FUND_PARAMS:
@@ -435,8 +437,8 @@ def save_user_settings_to_db():
     tech_dict = {k: st.session_state.get(f"tech_{k}", True) for k in DEFAULT_TECH_PARAMS}
     payload = {
         "user_id": user_id,
-        "w_fund": st.session_state.get("w_fund", 4),
-        "w_tech": st.session_state.get("w_tech", 4),
+        "w_fund": st.session_state.get("w_fund", 5),
+        "w_tech": st.session_state.get("w_tech", 5),
         "fund_rules": fund_dict,
         "tech_rules": tech_dict,
         "digest_opt_in": bool(st.session_state.get("digest_opt_in", False)),
@@ -1488,32 +1490,42 @@ def _run_streamlit_ui():
 
     # ----------------------------------------------------------------------------------
     st.sidebar.header("⚙️ Engine Controls")
-    st.sidebar.subheader("1. Pillar Weights")
-    def on_weight_change():
+    st.sidebar.subheader("1. Pillar Weights (sum to 10)")
+    from digest import clamp_pillar_weights as _clamp_w
+    _wf0 = int(st.session_state.get("w_fund", 5))
+    _wt0 = int(st.session_state.get("w_tech", 5))
+    if _wf0 + _wt0 != 10:
+        _wf0, _wt0 = _clamp_w(_wf0, _wt0)
+        st.session_state["w_fund"] = _wf0
+        st.session_state["w_tech"] = _wt0
+
+    def on_fund_weight_change():
+        st.session_state["w_tech"] = 10 - int(st.session_state.get("w_fund", 5))
         save_user_settings_to_db()
         _persist_digest_pref()
+
+    def on_tech_weight_change():
+        st.session_state["w_fund"] = 10 - int(st.session_state.get("w_tech", 5))
+        save_user_settings_to_db()
+        _persist_digest_pref()
+
     w_fund = st.sidebar.slider(
         "Fundamental Weight",
         0,
         10,
         key="w_fund",
-        on_change=on_weight_change,
-        help="How much the CANSLIM fundamental score counts in Total. Technical takes the rest of the mix; the two weights are scaled if they do not add to 10.",
+        on_change=on_fund_weight_change,
+        help="Share of Total from the CANSLIM score. Technical is set to 10 minus this, so the two always add to 10.",
     )
     w_tech = st.sidebar.slider(
         "Technical Weight",
         0,
         10,
         key="w_tech",
-        on_change=on_weight_change,
-        help="How much the 10-point technical score counts in Total. Leadership vs Nifty and sector is inside the fundamental score (L / Ls), not a third pillar.",
+        on_change=on_tech_weight_change,
+        help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this. Leadership vs Nifty/sector is inside fundamentals (L / Ls).",
     )
-    _wsum = max(1, int(w_fund) + int(w_tech))
-    st.sidebar.caption(
-        f"Mix: {100 * int(w_fund) / _wsum:.0f}% fundamental / {100 * int(w_tech) / _wsum:.0f}% technical"
-        if int(w_fund) + int(w_tech) > 0
-        else "Set at least one weight above 0."
-    )
+    st.sidebar.caption(f"Fundamental {int(w_fund)} + Technical {int(w_tech)} = 10")
     st.sidebar.divider()
     st.sidebar.subheader("2. Pillar Customization")
     if st.sidebar.button(
@@ -1537,8 +1549,8 @@ def _run_streamlit_ui():
     )
 
     def _snapshot_engine():
-        w_f = int(st.session_state.get("w_fund", 4))
-        w_t = int(st.session_state.get("w_tech", 4))
+        w_f = int(st.session_state.get("w_fund", 5))
+        w_t = int(st.session_state.get("w_tech", 5))
         return {
             "w_fund": w_f,
             "w_tech": w_t,
@@ -2024,7 +2036,7 @@ def _run_streamlit_ui():
                     column_config={
                         "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
                         "Total Score": st.column_config.NumberColumn(
-                            "Total", format="%.2f", help="Weighted blend of Fund and Tech. Scaled if those two weights do not add to 10."
+                            "Total", format="%.2f", help="Weighted blend of Fund and Tech. The two weights always add to 10."
                         ),
                         "Fundamental Score": st.column_config.NumberColumn(
                             "Fund", format="%.2f", help="0–10 from enabled CANSLIM rules that this ticker passed (L/Ls are vs Nifty and sector)."
@@ -2187,7 +2199,7 @@ def _run_streamlit_ui():
                 column_config={
                     "Ticker": st.column_config.TextColumn("Symbol", pinned=True, width="medium"),
                     "Total Score": st.column_config.NumberColumn(
-                        "Total", format="%.2f", help="Weighted blend of Fund and Tech. Scaled if those two weights do not add to 10."
+                        "Total", format="%.2f", help="Weighted blend of Fund and Tech. The two weights always add to 10."
                     ),
                     "Fundamental Score": st.column_config.NumberColumn(
                         "Fund", format="%.2f", help="0–10 from enabled CANSLIM rules that this holding passed."
@@ -2242,7 +2254,7 @@ def _run_streamlit_ui():
         st.markdown("#### **3. Pillar Settings & Weightage Adjustment**")
         st.markdown(
             """
-            * **Adjust Weights:** Slide **Fundamental Weight** and **Technical Weight**. Total is a mix of those two scores (scaled if they do not add to 10). Leadership vs Nifty and sector is inside the fundamental score (L / Ls).
+            * **Adjust Weights:** Slide **Fundamental Weight** or **Technical Weight**. They always add to **10** — moving one fills the remainder on the other.
             * **Customize Rules:** Click **Fundamental Rules** or **Technical Rules** in the sidebar to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
             * **Morning email:** Check **Email me weekday morning scores** in the sidebar. At 8:30 AM IST on weekdays the job emails (or writes) the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Generate preview digest** to try it now. This is a score ranking, not a stock pick.
@@ -2292,7 +2304,7 @@ def _run_streamlit_ui():
                 * **T8 / T10:** MACD line rising (monthly / daily).
                 * **T9:** Weekly MACD above its signal, MACD > 0, and the line rising.
 
-                Total = (Fundamental × fund weight + Technical × tech weight) ÷ (fund + tech weights).
+                Total = (Fundamental × fund weight + Technical × tech weight) ÷ 10. The two weights always add to 10.
                 """
             )
 

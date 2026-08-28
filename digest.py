@@ -74,9 +74,24 @@ DISCLAIMER = (
 
 
 def clamp_pillar_weights(w_fund, w_tech, w_rs=None) -> tuple[int, int]:
-    """Two pillars only. w_rs is ignored (legacy settings)."""
-    w_fund = max(0, min(10, int(w_fund or 0)))
-    w_tech = max(0, min(10, int(w_tech or 0)))
+    """Two pillars that always sum to 10. w_rs is ignored (legacy settings)."""
+    try:
+        w_fund = int(w_fund or 0)
+    except (TypeError, ValueError):
+        w_fund = 0
+    try:
+        w_tech = int(w_tech or 0)
+    except (TypeError, ValueError):
+        w_tech = 0
+    w_fund = max(0, min(10, w_fund))
+    w_tech = max(0, min(10, w_tech))
+    total = w_fund + w_tech
+    if total <= 0:
+        return 5, 5
+    if total != 10:
+        w_fund = int(round(w_fund * 10 / total))
+        w_fund = max(0, min(10, w_fund))
+        w_tech = 10 - w_fund
     return w_fund, w_tech
 
 
@@ -319,7 +334,7 @@ def render_html(sections: list[dict], generated_at: datetime, top_n: int, settin
     weight_sum = cfg["w_fund"] + cfg["w_tech"]
     settings_line = (
         f"Your weights: Fundamental {cfg['w_fund']} / Technical {cfg['w_tech']} "
-        f"(sum {weight_sum}; scaled if they do not add to 10). Rankings use only the rules you have enabled."
+        f"(sum {weight_sum}). Rankings use only the rules you have enabled."
     )
     blocks = []
     for sec in sections:

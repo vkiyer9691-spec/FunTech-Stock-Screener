@@ -80,8 +80,8 @@ class DigestTests(unittest.TestCase):
         sub = subscriber_from_settings_row(row, "trader@example.com")
         self.assertEqual(sub["email"], "trader@example.com")
         self.assertEqual(sub["top_n"], 10)
-        self.assertEqual(sub["w_fund"], 5)
-        self.assertEqual(sub["w_tech"], 3)
+        self.assertEqual(sub["w_fund"], 6)
+        self.assertEqual(sub["w_tech"], 4)
         self.assertNotIn("w_rs", sub)
         self.assertIsNone(subscriber_from_settings_row({**row, "digest_opt_in": False}, "trader@example.com"))
 
@@ -91,7 +91,10 @@ class DigestTests(unittest.TestCase):
         )
         self.assertEqual(stale["w_fund"] + stale["w_tech"], 10)
 
-    def test_two_pillar_total_ignores_legacy_rs_weight(self):
+    def test_two_pillar_weights_always_sum_to_ten(self):
+        self.assertEqual(clamp_pillar_weights(5, 7), (4, 6))
+        self.assertEqual(clamp_pillar_weights(4, 4), (5, 5))
+        self.assertEqual(clamp_pillar_weights(0, 0), (5, 5))
         self.assertEqual(clamp_pillar_weights(1, 9, 2), (1, 9))
         total = round(weighted_total(5.71, 10.0, *clamp_pillar_weights(1, 9, 2)), 2)
         self.assertEqual(total, 9.57)
