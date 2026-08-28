@@ -6,7 +6,7 @@ Working log of **intention vs code** for FunTech scores. Discuss and decide here
 
 1. For each rule: record copy (sidebar / help / User Guide), what classic CANSLIM meant, what the code actually does, Nifty 50 sample where it matters, and options.
 2. You reply with a letter + option (e.g. `A2`, `N keep`) for everything you are ready to lock.
-3. Implementation, tests, labels, and User Guide are updated **once** for all locked items (except **C2**, already shipped).
+3. Implementation, tests, labels, and User Guide were updated in one scoring batch (`8351a51` on GitHub `main`), except **C2** which shipped earlier. T1–T10 were then reviewed in groups and left as coded.
 4. Do not ship scoring edits between letters unless you explicitly ask for a hotfix.
 
 **How the pillar score works (not changing unless we say so)**
@@ -37,7 +37,7 @@ Working log of **intention vs code** for FunTech scores. Discuss and decide here
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: A2 — not in code yet (batch)** |
+| **Status** | **Locked: A2 — in `main`** |
 | Sidebar | Annual Revenue Growth > 10% *(will be relabeled to quarterly Total Revenue)* |
 | Help | Annual revenue growth must be above 10% |
 | User Guide | Quarterly revenue growth > 10% YoY |
@@ -66,7 +66,7 @@ A2 is consistent with C2. It is still **sales**, not copybook A (annual EPS).
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: N2 + N4 — not in code yet (batch)** |
+| **Status** | **Locked: N2 + N4 — in `main`** |
 | Sidebar / UG | Near 52-week high (within 25%) |
 | Classic N | See below. Quantitative half = **new price highs**, not “25% off the high”. |
 | **Code (N1)** | `currentPrice` (Yahoo fast_info / info) or last close ≥ **75%** of Yahoo `fiftyTwoWeekHigh`. Skip if high or price missing. |
@@ -112,7 +112,7 @@ So 25% passes **~4 in 5** large caps; 10% passes **~1 in 3**; 5% is a true “ne
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: S3, 20 trading days — not in code yet (batch)** |
+| **Status** | **Locked: S3, 20 trading days — in `main`** |
 | Sidebar | Supply/Demand (Tight Base Consolidation) |
 | Help / UG | 10-day volatility ≤ 6% **and** price near 50-DMA (code: within **5%** of 50-DMA) |
 | **Code (S1)** | Needs ≥ 50 daily bars. Pass if 10-day close std/mean ≤ 6% **and** \|close − SMA50\| / SMA50 ≤ 5%. Skip if < 50 bars. If SMA50 is NaN, distance is set to 99 → **fail** (not skip). |
@@ -180,7 +180,7 @@ You chose 20 days over 50 knowing it is jumpy. On the sample that is **10 pass /
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: L9a — fold RS into L, drop RS pillar. Not in code yet (batch)** |
+| **Status** | **Locked: L9a — fold RS into L, drop RS pillar. In `main`** |
 | Sidebar / UG | Leader RS: Daily RSI > 55 |
 | **Code (L1)** | 14-day RSI of daily close > 55. Skip if < 14 bars or RSI is NaN. |
 
@@ -258,7 +258,7 @@ Yes, that is coherent. RS1/RS2 **are** CANSLIM L with extra UI. A third pillar e
 
 Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
 
-**Agreed (L9a) — not in code yet (batch):** Drop the RS pillar and the RS weight slider. Two pillars only: Fundamental and Technical. L is no longer RSI. It becomes two fundamental ticks with the old RS math: **L vs Nifty** (63-day return > Nifty) and **L vs sector** (63-day return > sector peers in this scan; skip if no sector). Breakdown still shows the percentages. T1–T10 remain chart/trend confirmation; they do not compare the stock to Nifty or peers.
+**Agreed (L9a) — in `main`:** Drop the RS pillar and the RS weight slider. Two pillars only: Fundamental and Technical. L is no longer RSI. It becomes two fundamental ticks with the old RS math: **L vs Nifty** (63-day return > Nifty) and **L vs sector** (63-day return > sector peers in this scan; skip if no sector). Breakdown still shows the percentages. T1–T10 remain chart/trend confirmation; they do not compare the stock to Nifty or peers.
 
 ---
 
@@ -266,7 +266,7 @@ Do **not** keep RSI as L. Do **not** keep RS1/RS2 toggles plus L.
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: I1 — not in code yet (batch)** |
+| **Status** | **Locked: I1 — in `main`** |
 | Sidebar / UG | Institutional ownership > 30% |
 | Help | Data is often missing |
 | **Code (I1)** | Yahoo `heldPercentInstitutions` > 0.30. Skip if missing. |
@@ -300,7 +300,7 @@ So I today is closer to “**not promoter-dominated**” than to “has institut
 | I4 | Pass if institutions > **10%** (has some sponsorship; almost all Nifty pass) |
 | I5 | Pass if institutions > 30% **of float** (needs float + outstanding; definitions often disagree) |
 
-**Agreed (I1) — not in code yet (batch):** Keep Yahoo institutions > 30% of outstanding; skip if missing. Relabel help so it does not say “data is often missing.” Accept promoter-led tilt: this is one dimension of a strength score, not a go/no-go veto; users can disable I or raise technical weight.
+**Agreed (I1) — in `main`:** Keep Yahoo institutions > 30% of outstanding; skip if missing. Relabel help so it does not say “data is often missing.” Accept promoter-led tilt: this is one dimension of a strength score, not a go/no-go veto; users can disable I or raise technical weight.
 
 ---
 
@@ -308,7 +308,7 @@ So I today is closer to “**not promoter-dominated**” than to “has institut
 
 | Field | Value |
 |---|---|
-| **Status** | **Locked: M1 — keep on every stock. Not in code yet (batch)** |
+| **Status** | **Locked: M1 — keep on every stock. In `main`** |
 | Sidebar / UG | Nifty 50 above its 200-DMA |
 | **Code (M1)** | `^NSEI` last close > SMA200. Skip if < 200 bars. **Same pass/fail for every stock in a scan.** |
 
