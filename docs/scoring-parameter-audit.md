@@ -308,7 +308,7 @@ So I today is closer to “**not promoter-dominated**” than to “has institut
 
 | Field | Value |
 |---|---|
-| **Status** | Open — discussed; not locked |
+| **Status** | **Locked: M1 — keep on every stock. Not in code yet (batch)** |
 | Sidebar / UG | Nifty 50 above its 200-DMA |
 | **Code (M1)** | `^NSEI` last close > SMA200. Skip if < 200 bars. **Same pass/fail for every stock in a scan.** |
 
@@ -334,39 +334,57 @@ Failing M lowers everyone’s fundamental score by the same fraction (one fewer 
 | M2 | Also require the 200-DMA sloping up over 5 bars (stricter; still the same for every name) |
 | **M3** | Do not put M in the per-stock score. Show “Nifty vs 200-DMA” once as a banner / digest header |
 
-**Recommended given your I comment (strength score, not veto):** **M3** is the cleaner fit — market regime is context, not a fake stock-level tick. **M1** is fine if you *want* the printed score to be softer in a down tape so a “7” in a bull market is not the same as a “7” in a bear. M2 is still universe-wide, just harder.
+**Agreed (M1) — keep in the per-stock score.** Same field for everyone: Nifty > 200-DMA. Dock all or dock none. Preserves the CANSLIM letter. Help text will explain that M does not rank stocks against each other.
+
+**Also agreed for the batch:** rewrite User Guide + sidebar help so each locked C/A/N/S/L/I/M and T1–T10 states the actual rule in plain language (not the old RSI-L / annual-revenue wording).
 
 ---
 
-## T1–T10 — Technical (not discussed yet)
+## T1–T10 — Technical
 
-All are pass/fail. Missing data **fails** (unlike fundamentals). Need ≥ 30 daily bars or the whole pillar is 0.
+| Field | Value |
+|---|---|
+| **Status** | Open — discussed; not locked |
+| Scoring | Pass/fail. Missing data **fails** (unlike C/A/N…). Need ≥ 30 daily bars or the whole pillar is 0. |
 
-| ID | Label | Code | Status |
-|---|---|---|---|
-| T1 | Close > 200 DMA and near 50 DMA (within 5%) | `close > SMA200` and `|close−SMA50|/SMA50 ≤ 5%` | Open |
-| T2 | Tight consolidation near 50/20 DMA | (`near 50` or `near 20` within 5%) and 10-day vol ≤ 6% | Open |
-| T3 | Early Stage 2: Close ≤ 1.25 × 200 DMA | `SMA200 < close ≤ 1.25×SMA200` | Open |
-| T4 | 50 and 200 DMA sloping up (5 bars) | last > value 5 bars ago on each SMA | Open |
-| T5 | Monthly RSI > 50 and rising | monthly RSI last > 50 and last > 2 bars ago | Open |
-| T6 | Weekly RSI > 50 and rising | same on weekly | Open |
-| T7 | Daily RSI > 50 and rising | same on daily (overlaps L’s RSI > 55) | Open |
-| T8 | Monthly MACD line rising | MACD line last > 2 bars ago | Open |
-| T9 | Weekly MACD positive crossover and rising | MACD > signal, MACD > 0, line rising | Open |
-| T10 | Daily MACD line rising | line rising | Open |
+These are **chart health** checks on the stock itself, not vs Nifty (that is L). They overlap each other on purpose (trend + oscillators on three timeframes).
 
-`slope_up` / `is_rising` compare **two points** (now vs N bars ago), not a fitted slope.
+| ID | What it asks | Exact test | Nifty sample pass (24 names) |
+|---|---|---|---:|
+| T1 | Uptrend and coiled on the 50-DMA | Close > SMA200 **and** within 5% of SMA50 | 9/24 |
+| T2 | Tight coil near 20- or 50-DMA | Within 5% of SMA50 **or** SMA20, **and** 10-day vol ≤ 6% | **23/24** |
+| T3 | Stage 2, not extended | SMA200 < close ≤ 1.25 × SMA200 | 10/24 |
+| T4 | MAs still rising | SMA50 and SMA200 each higher than 5 bars ago | 6/24 |
+| T5 | Monthly momentum | Monthly RSI > 50 and higher than 2 months ago | 9/24 |
+| T6 | Weekly momentum | Same on weekly | 4/24 |
+| T7 | Daily momentum | Daily RSI > 50 and higher than 2 days ago | 6/24 |
+| T8 | Monthly MACD | Monthly MACD line higher than 2 months ago | 13/24 |
+| T9 | Weekly MACD constructive | Weekly MACD > signal, MACD > 0, line rising | 7/24 |
+| T10 | Daily MACD | Daily MACD line higher than 2 days ago | 7/24 |
+
+Median technical score on that sample: **3.5 / 10**. ICICI 9, Titan/Adani Ent 8; many large caps 1 (often **T2 only**).
+
+**Notes**
+
+- **T2 is almost a free point** on Nifty 50 (same inert 6% vol we saw on old S). It still fails Kotak in this sample.
+- “Rising” / “sloping up” is **two points**, not a regression: now vs 5 bars (T4) or 2 bars (RSI/MACD).
+- T7 is the old L (RSI), which is fine now that L is vs Nifty/sector.
+- T1 and T3 both need close > 200-DMA; T3 also caps extension.
+- Unlike fundamentals, a NaN SMA/RSI **fails** the tick rather than skipping it.
+
+**Options**
+
+| ID | Choice |
+|---|---|
+| **T-keep** | Keep all ten tests as written. Rewrite help so users see the exact rules. **Recommended.** |
+| T-skip | Same tests, but missing indicator = skip (like C/A), not fail |
+| T2-tighten | Raise the bar on T2 (e.g. require near **both** MAs, or vol ≤ 3%) so it is not a free point |
 
 ---
 
-## RS1 / RS2 — Relative strength (not discussed yet)
+## RS1 / RS2 — folded into L (L9a)
 
-| ID | Label | Code | Status |
-|---|---|---|---|
-| RS1 | vs Nifty 50, ~63 trading days | `clip(2.5 + (stock−nifty)% / 10 × 2.5, 0, 5)` so ±10pp vs Nifty maps to 0–5 | Open |
-| RS2 | vs same-sector peers **in this scan** | Same formula vs sector average 63-day return. Skipped if sector missing/Unknown. | Open |
-
-RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not the whole sector.
+No longer a third pillar. 63-day vs Nifty and vs sector become **L vs Nifty** and **L vs sector**. Continuous 0–5 mapping is dropped; breakdown still shows the %.
 
 ---
 
@@ -378,8 +396,9 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 - **S3 (20 trading days)** — up-volume > down-volume; skip if missing; relabel demand. Tightness stays T1/T2.
 - **L9a** — drop RS pillar; L vs Nifty and L vs sector (63-day returns); skip sector if unknown; show % in breakdown only.
 - **I1** — Yahoo institutions > 30%; skip if missing; keep as one optional dimension.
+- **M1** — Nifty > 200-DMA on every stock (same pass/fail for the whole scan).
+- **Help/User Guide** — rewrite to match locked rules (CANSLIM + T1–T10) in the same code drop.
 
 ## Pending your reply
 
-- **M** — M1 / M2 / **M3** (banner; fits a rank-style screener)
-- Then **T1–T10**
+- **T1–T10** — keep as written, or change T2 (almost always pass) / missing-data policy
