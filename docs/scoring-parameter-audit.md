@@ -220,6 +220,8 @@ So L1 is a **strict short-term momentum cut**, not “leader vs laggard.” In t
 
 **Recommended:** **L4** if you do not want two copies of leadership, or **L3** if you want a pass/fail “beats the market” point in the CANSLIM pillar and are fine that RS1 still scores the *amount* of outperformance. I would **not** keep RSI as L.
 
+**Your reading (overlap with RS) is right.** Classical L *is* relative strength vs the market. **RS1** is that measure (continuous). **RS2** is the same idea vs sector peers. A third “leader” check in the fundamental pillar either copies RS1 (L3) or uses the wrong tool (RSI). **Lean L4:** drop L from CANSLIM-7; keep leadership in the RS pillar.
+
 ---
 
 ## I — Institutional sponsorship
@@ -308,6 +310,6 @@ RS2 is scan-universe dependent: a Nifty 50-only scan uses only those peers, not 
 
 ## Pending your reply
 
-- **L** — L1 / L2 / L3 / L4
+- **L** — leaning **L4** (drop; RS1/RS2 already cover leadership); confirm
 - **I, M** — pick IDs or “keep”
 - Then T1–T10 and RS1/RS2 in a later pass of this same file, still one implementation drop
