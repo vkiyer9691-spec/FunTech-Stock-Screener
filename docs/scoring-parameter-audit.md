@@ -386,7 +386,7 @@ No longer a third pillar. 63-day vs Nifty and vs sector become **L vs Nifty** an
 
 ## Locked decisions
 
-Implemented in scoring + User Guide (except T1–T10, which are documented as-is pending a later review):
+Implemented in scoring + User Guide. T1–T10 reviewed in groups:
 
 - **C2** — quarterly EPS YoY.
 - **A2** — quarterly Total Revenue YoY; skip if missing.
