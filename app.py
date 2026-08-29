@@ -63,6 +63,7 @@ def _cfg(name: str, nested_section: str | None = None, nested_key: str | None = 
     except Exception:
         pass
     return ""
+
 # Optional Supabase Import with Graceful Fallback
 try:
     from supabase import create_client, Client
@@ -72,7 +73,6 @@ except ImportError:
 
 # ----------------------------------------------------------------------------------
 # Page Config & CSS Scaffolding
-
 # ----------------------------------------------------------------------------------
 
 def _apply_page_chrome():
@@ -121,7 +121,6 @@ def _apply_page_chrome():
 
 # ----------------------------------------------------------------------------------
 # Constants & Defaults
-
 # ----------------------------------------------------------------------------------
 BENCHMARK = "^NSEI"
 DEFAULT_FUND_PARAMS = {
@@ -182,9 +181,7 @@ BROKER_SYMBOL_HEADERS = [
 
 # ----------------------------------------------------------------------------------
 # Dynamic Universe Sources (NSE Index Constituents & F&O List)
-
 # ----------------------------------------------------------------------------------
-# Stable, unchanging filenames for NSE's official index constituent CSVs.
 NSE_INDEX_FILES = {
     "Nifty 50": "ind_nifty50list",
     "Nifty Next 50": "ind_niftynext50list",
@@ -192,8 +189,6 @@ NSE_INDEX_FILES = {
     "Nifty Smallcap 250": "ind_niftysmallcap250list",
     "Nifty 500": "ind_nifty500list",
 }
-# Small emergency fallbacks — only used if NSE's live endpoints are unreachable
-# (e.g. blocked cloud IP). Not exhaustive; the app always tries live data first.
 FALLBACK_INDEX_LISTS = {
     "Nifty 50": [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "BHARTIARTL.NS",
@@ -228,7 +223,6 @@ FALLBACK_INDEX_LISTS = {
         "ASIANPAINT.NS", "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS",
     ],
 }
-# Fallback for F&O eligible stocks — used only if NSE's live JSON API is unreachable.
 FALLBACK_FO_STOCKS = [
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "BHARTIARTL.NS",
     "ITC.NS", "LT.NS", "SBIN.NS", "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS",
@@ -318,7 +312,6 @@ _register_sector("Communication Services", [
 
 # ----------------------------------------------------------------------------------
 # Safe Supabase Helper & Persistence Engine
-
 # ----------------------------------------------------------------------------------
 
 def get_supabase_client():
@@ -334,7 +327,7 @@ def get_supabase_client():
     return None
 
 def is_admin(user) -> bool:
-    """Dynamic Role Check via Supabase Profiles Table"""
+    """Strict Role Check for 'admin' only"""
     if not user:
         return False
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
@@ -343,7 +336,6 @@ def is_admin(user) -> bool:
     
     supabase = get_supabase_client()
     if not supabase:
-        # Fallback for local development mode
         email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
         return email.lower() == "vkiyer@hotmail.com"
     try:
@@ -353,6 +345,30 @@ def is_admin(user) -> bool:
         res = supabase.table("profiles").select("role").eq("id", user_id).execute()
         if res.data and len(res.data) > 0:
             return res.data[0].get("role") == "admin"
+    except Exception:
+        pass
+    return False
+
+def is_authorized_or_admin(user) -> bool:
+    """Broad Role Check for either 'admin' or 'authorized'"""
+    if not user:
+        return False
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not user_id:
+        return False
+    
+    supabase = get_supabase_client()
+    if not supabase:
+        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+        return email.lower() == "vkiyer@hotmail.com"
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        res = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            role = res.data[0].get("role")
+            return role in ["admin", "authorized"]
     except Exception:
         pass
     return False
@@ -439,10 +455,7 @@ def save_user_settings_to_db():
             st.error(f"Failed to save settings: {e}")
 
 # ----------------------------------------------------------------------------------
-# Score History & Watchlist (require the scan_history / watchlist tables — see
-# supabase_migration.sql. Both degrade gracefully and silently if the tables
-# haven't been created yet, so the rest of the app keeps working either way.
-
+# Score History & Watchlist
 # ----------------------------------------------------------------------------------
 
 def _current_user_id():
@@ -452,8 +465,6 @@ def _current_user_id():
     return user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
 
 def save_scan_history(results_df: pd.DataFrame):
-    """Persists one row per ticker for this scan, so score trends can be charted
-    over time. Called automatically after every successful screener scan."""
     supabase = get_supabase_client()
     user_id = _current_user_id()
     if not supabase or not user_id or results_df is None or results_df.empty:
@@ -475,19 +486,14 @@ def save_scan_history(results_df: pd.DataFrame):
             "sector": r.get("Sector"),
         })
     try:
-        # Supabase/PostgREST caps request size; chunk large universes (e.g. Nifty 500).
         chunk_size = 200
         for i in range(0, len(rows), chunk_size):
             supabase.table("scan_history").insert(rows[i:i + chunk_size]).execute()
     except Exception:
-        # Most likely cause: the scan_history table doesn't exist yet (migration
-        # not run). Fail silently rather than breaking the scan the user just ran.
         pass
 @st.cache_data(ttl=300, show_spinner=False)
 
 def _load_scan_history_cached(user_id: str, ticker: str, _supabase_url: str) -> pd.DataFrame:
-    # _supabase_url is only present to vary the cache key across environments;
-    # the actual client is re-fetched fresh each call since it can't be cached.
     supabase = get_supabase_client()
     if not supabase or not user_id:
         return pd.DataFrame()
@@ -517,7 +523,6 @@ def load_scan_history(user_id: str, ticker: str) -> pd.DataFrame:
     return _load_scan_history_cached(user_id, ticker, url_key)
 
 def get_watchlist() -> list:
-    """Returns the current user's watchlist tickers, or [] if unavailable/empty."""
     supabase = get_supabase_client()
     user_id = _current_user_id()
     if not supabase or not user_id:
@@ -799,55 +804,15 @@ def render_login_screen():
     return False
 
 # ----------------------------------------------------------------------------------
-# Helper Functions & Data Fetchers
-
+# Data Fetchers
 # ----------------------------------------------------------------------------------
 
-def abbreviate_sector(sector_raw: str) -> str:
-    if not sector_raw or sector_raw == "Unknown":
-        return "Unknown"
-    return SECTOR_MAP.get(sector_raw.strip(), sector_raw.strip())
-
-def parse_broker_symbols(df: pd.DataFrame) -> list:
-    matched_col = None
-    cleaned_cols = {str(c).strip().lower(): c for c in df.columns}
-    
-    for key in BROKER_SYMBOL_HEADERS:
-        if key in cleaned_cols:
-            matched_col = cleaned_cols[key]
-            break
-            
-    if not matched_col:
-        return []
-    raw_symbols = df[matched_col].dropna().astype(str).tolist()
-    formatted_symbols = []
-    
-    for sym in raw_symbols:
-        clean = sym.strip().upper()
-        clean = clean.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
-        if clean and not clean.startswith("^"):
-            formatted_symbols.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
-            
-    return list(dict.fromkeys(formatted_symbols))
 @st.cache_resource
-
 def _get_freshness_tracker() -> dict:
-    """
-    A dict that persists across reruns AND across user sessions (unlike
-    st.session_state, which is per-session, or st.cache_data, which copies
-    rather than shares). Used to record when data sources last actually
-    fetched (not served from cache), for the sidebar freshness indicator.
-    """
     return {}
 @st.cache_data(ttl=86400, show_spinner=False)
 
 def load_index_list(index_name: str) -> list:
-    """
-    Fetches the live, current constituent list for a given NSE index.
-    Tries NSE's modern CDN first, then the legacy archive host, then falls
-    back to a small curated list if both live sources are unreachable
-    (e.g. NSE blocking a cloud-hosted IP).
-    """
     filename = NSE_INDEX_FILES.get(index_name)
     if not filename:
         return []
@@ -869,9 +834,6 @@ def load_index_list(index_name: str) -> list:
             continue
     _get_freshness_tracker()[f"universe:{index_name}"] = (pd.Timestamp.now(), "fallback")
     return FALLBACK_INDEX_LISTS.get(index_name, [])
-_FO_MIN_PLAUSIBLE_COUNT = 100  # NSE's real F&O universe is ~180-220; anything far
-                                # below this signals a truncated/paginated response,
-                                # not a genuine full list — treat it as a failure.
 
 def _nse_session(referer: str) -> requests.Session:
     session = requests.Session()
@@ -881,14 +843,10 @@ def _nse_session(referer: str) -> requests.Session:
         "Accept": "application/json, text/plain, */*",
         "Referer": referer,
     })
-    # Cookie handshake: NSE's API rejects requests without valid session cookies.
     session.get(referer, timeout=6)
     return session
 
 def _fo_tier1_stock_indices() -> list:
-    """Primary source: NSE's equity-stockIndices JSON API. Tried twice (transient
-    handshake failures are common). Rejected if suspiciously small (see
-    _FO_MIN_PLAUSIBLE_COUNT) — a 200 response isn't proof of a complete list."""
     for _ in range(2):
         try:
             session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
@@ -910,11 +868,6 @@ def _fo_tier1_stock_indices() -> list:
     return []
 
 def _fo_tier2_equity_master() -> list:
-    """Secondary source: NSE's equity-master JSON, a dict of {category: [symbols]}
-    used to populate their market-watch dropdowns. The exact key spelling for the
-    F&O category isn't publicly documented and can vary, so this scans all keys
-    defensively for anything that looks like an F&O category rather than assuming
-    one exact string."""
     try:
         session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
         resp = session.get("https://www.nseindia.com/api/equity-master", timeout=8)
@@ -937,15 +890,8 @@ def _fo_tier2_equity_master() -> list:
     return []
 
 def _parse_fo_mktlots_csv(text: str) -> list:
-    """The fo_mktlots CSV has two stacked tables (index derivatives, then individual
-    stock derivatives) sharing one file — a plain pd.read_csv would misread the
-    second header row as data. This walks the raw text, finds the individual-
-    securities section by its header line, then reads only that block."""
     lines = text.splitlines()
-    start_idx = next(
-        (i for i, ln in enumerate(lines) if "derivatives on individual securities" in ln.lower()),
-        None,
-    )
+    start_idx = next((i for i, ln in enumerate(lines) if "derivatives on individual securities" in ln.lower()), None)
     if start_idx is None or start_idx + 1 >= len(lines):
         return []
     header = next(csv.reader([lines[start_idx + 1]]))
@@ -966,10 +912,6 @@ def _parse_fo_mktlots_csv(text: str) -> list:
     return sorted(tickers)
 
 def _fo_tier3_dated_csv() -> list:
-    """Tertiary source: NSE republishes a dated fo_mktlots_DDMMYYYY.csv file each
-    derivatives cycle with no stable/predictable filename. This guesses a handful
-    of recent likely dates (month-end, and a few days around it, for the current
-    and prior month) — a best-effort attempt, not a reliable primary source."""
     today = date.today()
     candidate_dates = set()
     for months_back in range(2):
@@ -977,12 +919,11 @@ def _fo_tier3_dated_csv() -> list:
         while month <= 0:
             month += 12
             year -= 1
-        # last day of that month
         if month == 12:
             last_day = date(year, 12, 31)
         else:
             last_day = date(year, month + 1, 1) - timedelta(days=1)
-        for offset in range(-3, 2):  # a few days either side of month-end
+        for offset in range(-3, 2): 
             candidate_dates.add(last_day + timedelta(days=offset))
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     for d in sorted(candidate_dates, reverse=True):
@@ -999,16 +940,6 @@ def _fo_tier3_dated_csv() -> list:
 @st.cache_data(ttl=86400, show_spinner=False)
 
 def load_fo_stocks() -> list:
-    """
-    Fetches the current F&O (Futures & Options) eligible stock list, trying three
-    independent live sources in sequence before giving up:
-      1. NSE's equity-stockIndices JSON API (fast, usually works)
-      2. NSE's equity-master JSON (different endpoint, different failure mode)
-      3. The dated fo_mktlots CSV, guessing a handful of recent likely filenames
-    Each is validated against a minimum plausible count so a "successful but
-    truncated" response doesn't get mistaken for the real thing. If all three
-    fail, falls back to a curated list of ~190 well-known liquid F&O names.
-    """
     for tier_fn in (_fo_tier1_stock_indices, _fo_tier2_equity_master, _fo_tier3_dated_csv):
         tickers = tier_fn()
         if tickers:
@@ -1016,6 +947,7 @@ def load_fo_stocks() -> list:
             return tickers
     _get_freshness_tracker()["universe:F&O Stocks"] = (pd.Timestamp.now(), "fallback")
     return FALLBACK_FO_STOCKS
+
 UNIVERSE_SOURCE_OPTIONS = list(NSE_INDEX_FILES.keys()) + ["F&O Stocks"]
 @st.cache_data(ttl=1800, show_spinner=False)
 
@@ -1044,7 +976,7 @@ def fetch_info(ticker: str) -> dict:
         "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
         "revenueGrowth": None, "fiftyTwoWeekHigh": None,
         "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
-        "sector": None,  # bug fix: was "Unknown", which silently blocked yfinance's real value below
+        "sector": None,
     }
     try:
         t = yf.Ticker(ticker)
@@ -1084,16 +1016,12 @@ def fetch_info(ticker: str) -> dict:
             pass
     except Exception:
         pass
-    # yfinance genuinely omits 'sector' for a meaningful chunk of NSE tickers (more
-    # noticeable now that larger universes are being scanned). Fall back to a static
-    # curated map before giving up and showing "Unknown".
     if not default_info.get("sector"):
         default_info["sector"] = SYMBOL_SECTOR_MAP.get(ticker, "Unknown")
     return default_info
 
 # ----------------------------------------------------------------------------------
 # Dialog Modals
-
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
 def customize_fundamental_modal():
@@ -1190,9 +1118,31 @@ def show_pillar_details_modal(row_data):
         st.session_state["active_inspect_ticker"] = None
         st.rerun()
 
+@st.dialog("📚 Setup Logic Documentation")
+def show_setup_documentation_modal():
+    st.markdown("""
+    ### 5-Setup Engine Rules Breakdown
+    
+    **1. Multi-Timeframe Pullback**
+    Stochastic K crosses D below 60 within the last 3 days, backed by a MACD line sloping upwards. Captures healthy pullbacks in strong momentum stocks.
+    
+    **2. Breakout Retest**
+    Price broke its 40-day high within the last 5 days on above-average volume, and is now resting quietly within 3% of that breakout line on lower volume. Identifies low-risk entries on prior resistance turning into support.
+    
+    **3. RSI Momentum Resumption**
+    RSI recently peaked > 60, cooled off below 55 naturally, and is now actively curling back up through 55 alongside confirming higher price action. 
+    
+    **4. Volatility Squeeze**
+    Stock is forming two consecutive 'Inside Days' (tighter high/low ranges) on extremely low volume (drying up float), signaling a potential explosive breakout is imminent.
+    
+    **5. 20-EMA Trend Bounce**
+    Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
+    """)
+    if st.button("Close", use_container_width=True):
+        st.rerun()
+
 # ----------------------------------------------------------------------------------
 # Calculation Engines
-
 # ----------------------------------------------------------------------------------
 
 def resample_ohlc(daily: pd.DataFrame, rule: str) -> pd.DataFrame:
@@ -1211,12 +1161,6 @@ def resample_ohlc(daily: pd.DataFrame, rule: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 
 def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
-    """
-    Wilder's RSI, matching the convention pandas_ta previously used.
-    Self-contained (no pandas_ta dependency) — pandas_ta is a largely unmaintained
-    library that was found to silently return None/empty results under pandas 3.0,
-    which made every RSI/MACD-based technical rule (T5-T10) always evaluate False without raising any visible error.
-    """
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -1224,20 +1168,10 @@ def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / length, min_periods=length, adjust=False).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
-    rsi = rsi.where(avg_loss != 0, 100.0)  # no losses at all -> RSI 100, not NaN/inf
+    rsi = rsi.where(avg_loss != 0, 100.0) 
     return rsi
 
 def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
-    """
-    Standard MACD (self-contained, see compute_rsi docstring for why). Column order
-    matches pandas_ta's old convention — [MACD, MACDh, MACDs] — so existing code
-    indexing by position (.iloc[:, 0] for MACD line, .iloc[:, 2] for signal line)
-    keeps working unchanged.
-    Note: unlike SMA, EMA doesn't need a full `slow`-length window to produce a
-    value — only a low floor is enforced here (not slow+signal), since monthly
-    data (2y of daily -> ~24 bars) would otherwise always fall short and silently
-    zero out the monthly MACD rule, the same failure mode this replaces.
-    """
     if len(series.dropna()) < signal + 2:
         return pd.DataFrame(columns=["MACD", "MACDh", "MACDs"])
     ema_fast = series.ewm(span=fast, adjust=False).mean()
@@ -1248,10 +1182,6 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
     return pd.DataFrame({"MACD": macd_line, "MACDh": hist, "MACDs": signal_line})
 
 def check_stocks_setting_up(df):
-    """
-    Evaluates a single stock's dataframe against the 5 Setup Engine rules.
-    Returns a list of tags for the setups that triggered.
-    """
     if df is None or len(df) < 60:
         return []
         
@@ -1278,17 +1208,14 @@ def check_stocks_setting_up(df):
     # SETUP 1: Multi-Timeframe Pullback
     macd_sloping_up = today['MACD_Line'] > yest['MACD_Line']
     recent_cross_below_60 = False
-    
     for i in range(1, 4):
         curr_k = df['STOCH_K'].iloc[-i]
         curr_d = df['STOCH_D'].iloc[-i]
         prev_k = df['STOCH_K'].iloc[-(i+1)]
         prev_d = df['STOCH_D'].iloc[-(i+1)]
-        
         if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
             recent_cross_below_60 = True
             break
-            
     if macd_sloping_up and recent_cross_below_60:
         tags.append("✔️ Pullback")
 
@@ -1296,10 +1223,8 @@ def check_stocks_setting_up(df):
     lookback = 40
     resistance = df['High'].iloc[-lookback-5:-5].max() 
     recent_breakout = df.iloc[-5:]['Close'].max() > resistance
-    
     resting_near_res = (resistance * 0.97) <= today['Close'] <= (resistance * 1.03)
     quiet_volume = today['Volume'] < today['Vol_20_SMA']
-    
     if recent_breakout and resting_near_res and quiet_volume:
         tags.append("✔️ Breakout Retest")
 
@@ -1308,7 +1233,6 @@ def check_stocks_setting_up(df):
     rsi_cooled = df['RSI'].iloc[-5:-1].min() < 55
     rsi_curling_up = yest['RSI'] < 55 and today['RSI'] >= 55
     price_confirming = today['Close'] > yest['Close']
-    
     if rsi_hit_high and rsi_cooled and rsi_curling_up and price_confirming:
         tags.append("✔️ RSI Resumption")
 
@@ -1316,24 +1240,20 @@ def check_stocks_setting_up(df):
     inside_day_1 = (yest['High'] < df.iloc[-3]['High']) and (yest['Low'] > df.iloc[-3]['Low'])
     inside_day_2 = (today['High'] < yest['High']) and (today['Low'] > yest['Low'])
     vol_dry_up = today['Volume'] < (today['Vol_20_SMA'] * 0.6)
-    
     if inside_day_1 and inside_day_2 and vol_dry_up:
         tags.append("✔️ Vol Squeeze")
 
     # SETUP 5: 20-EMA Trend Bounce
     strong_trend = today['EMA_20'] > today['SMA_50']
     touched_ema = today['Low'] <= today['EMA_20'] and today['Close'] > today['EMA_20']
-    
     daily_range = today['High'] - today['Low']
     closed_strong = today['Close'] > (today['Low'] + (daily_range * 0.5))
-    
     if strong_trend and touched_ema and closed_strong:
         tags.append("✔️ 20-EMA Bounce")
 
     return tags
 
 def _yoy_latest_vs_year_ago(df: pd.DataFrame | None, needles: list[str]) -> float | None:
-    """(latest quarter − quarter ~1y ago) / |year-ago|, Yahoo columns newest-first."""
     if df is None or getattr(df, "empty", True) or getattr(df, "shape", (0, 0))[1] < 5:
         return None
     row = None
@@ -1354,23 +1274,18 @@ def _yoy_latest_vs_year_ago(df: pd.DataFrame | None, needles: list[str]) -> floa
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
-
 def canslim_c_growth(info: dict) -> float | None:
-    """C2: quarterly YoY. Prefer diluted EPS; else net income. Ignore annual earningsGrowth."""
     for key in ("quarterly_eps_yoy", "quarterly_ni_yoy"):
         val = info.get(key)
         if val is not None and pd.notna(val):
             return float(val)
     return None
 
-
 def canslim_a_growth(info: dict) -> float | None:
-    """A2: quarterly Total Revenue YoY. Ignore Yahoo revenueGrowth."""
     val = info.get("quarterly_rev_yoy")
     if val is not None and pd.notna(val):
         return float(val)
     return None
-
 
 def period_return_pct(close: pd.Series | None, lookback: int = 63) -> float | None:
     if close is None:
@@ -1387,9 +1302,7 @@ def period_return_pct(close: pd.Series | None, lookback: int = 63) -> float | No
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
-
 def fifty_two_week_high(info: dict, daily: pd.DataFrame | None) -> float | None:
-    """N4: max of Yahoo 52-week high (if present) and last ~252 daily highs."""
     highs: list[float] = []
     y = info.get("fiftyTwoWeekHigh") if info else None
     if y is not None and pd.notna(y):
@@ -1406,9 +1319,7 @@ def fifty_two_week_high(info: dict, daily: pd.DataFrame | None) -> float | None:
             highs.append(float(window.max()))
     return max(highs) if highs else None
 
-
 def up_volume_exceeds_down(daily: pd.DataFrame | None, sessions: int = 20) -> bool | None:
-    """S3: last `sessions` bars, volume on up-close days vs down-close days."""
     if daily is None or daily.empty or "Volume" not in daily.columns or "Close" not in daily.columns:
         return None
     if len(daily) < sessions + 1:
@@ -1424,11 +1335,9 @@ def up_volume_exceeds_down(daily: pd.DataFrame | None, sessions: int = 20) -> bo
         return None
     return bool(up > down)
 
-
 def _set_fund_rule(raw: dict, valid: dict, key: str, passed: bool | None) -> None:
     raw[key] = passed
     valid[key] = passed is not None
-
 
 def slope_up(series: pd.Series, lookback: int = 5) -> bool:
     s = series.dropna()
@@ -1576,7 +1485,6 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     sector_returns = {}
     progress = None
     
-    # Always show the progress bar if rendering inside the Streamlit web app
     if _in_streamlit():
         progress = st.progress(0, text="Fetching stock data...")
         
@@ -1595,16 +1503,11 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
                 if len(daily) >= 63:
                     ret = (daily["Close"].iloc[-1] / daily["Close"].iloc[-63] - 1) * 100
                     sec = info.get("sector", "Unknown")
-                    # Don't group "Unknown" sector stocks together — they're not
-                    # actually peers of each other, just tickers missing metadata.
-                    # Grouping them created a meaningless synthetic sector average.
                     if sec and sec != "Unknown":
                         sector_returns.setdefault(sec, []).append(ret)
     if progress:
         progress.empty()
     if _in_streamlit():
-        # Stash raw per-ticker price history for reuse by the Historical Validation
-        # (backtest) tool below, so it doesn't need to re-fetch everything separately.
         st.session_state["scan_raw_daily"] = {tkr: v["daily"] for tkr, v in stock_data.items()}
     sector_avg = {sec: np.mean(rets) for sec, rets in sector_returns.items() if rets}
     results = []
@@ -1635,8 +1538,11 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
         })
     return pd.DataFrame(results), skipped
 
+# ----------------------------------------------------------------------------------
+# Main UI App Loop
+# ----------------------------------------------------------------------------------
+
 def _run_streamlit_ui():
-    """Streamlit-only entry. Kept off the import path so daily_digest.py can reuse the engine."""
     _apply_page_chrome()
     _flush_auth_cookie_js()
     init_auth_session()
@@ -1655,7 +1561,11 @@ def _run_streamlit_ui():
             st.session_state["digest_opt_in"] = bool(stored.get("opt_in", False))
             st.session_state["digest_top_n"] = int(stored.get("top_n") or 10)
         st.session_state["digest_pref_hydrated"] = True
+    
+    # Check roles
     user_is_admin = is_admin(current_user)
+    user_is_authorized_or_admin = is_authorized_or_admin(current_user)
+
     head_l, head_r = st.columns([3, 2])
     with head_l:
         st.title("📊 NSE Stock Screener & Portfolio Evaluator")
@@ -1665,25 +1575,20 @@ def _run_streamlit_ui():
             f"<div style='text-align:right;padding-top:0.6rem'>"
             f"<strong>{user_email}</strong><br>"
             f"<span style='color:#666;font-size:0.9rem'>"
-            f"{'Administrator' if user_is_admin else 'Signed in'}"
+            f"{'Administrator' if user_is_admin else 'Authorized User' if user_is_authorized_or_admin else 'Signed in'}"
             f"</span></div>",
             unsafe_allow_html=True,
         )
-        if st.button(
-            "Log Out",
-            use_container_width=True,
-            help="End this session. Unsaved on-screen results are cleared; cloud settings stay in Supabase.",
-        ):
+        if st.button("Log Out", use_container_width=True):
             _clear_stay_session()
             supabase = get_supabase_client()
             if supabase:
-                try:
-                    supabase.auth.sign_out()
-                except Exception:
-                    pass
+                try: supabase.auth.sign_out()
+                except Exception: pass
             _flush_auth_cookie_js()
             st.session_state.clear()
             st.rerun()
+
     target_ticker = st.session_state.get("active_inspect_ticker")
     if target_ticker:
         found_row = None
@@ -1736,8 +1641,7 @@ def _run_streamlit_ui():
         _email = _user.get("email") if isinstance(_user, dict) else getattr(_user, "email", "")
         _id = _user.get("id") if isinstance(_user, dict) else getattr(_user, "id", "")
         save_pref(
-            str(_id or ""),
-            str(_email or ""),
+            str(_id or ""), str(_email or ""),
             bool(st.session_state.get("digest_opt_in")),
             int(st.session_state.get("digest_top_n") or 10),
             settings=_snapshot_engine(),
@@ -1749,14 +1653,11 @@ def _run_streamlit_ui():
     w_fund = int(st.session_state.get("w_fund", 5))
     w_tech = int(st.session_state.get("w_tech", 5))
 
-    # CHANGED: The "Stocks Setting Up" tab is now ALWAYS visible in the array.
-    tab_list = [
-        "🔍 Stock Screener", 
-        "💼 Portfolio Evaluator", 
-        "📈 Stocks Setting Up", 
-        "🎛️ User-defined controls", 
-        "ℹ️ User Guide"
-    ]
+    # Dynamically build tabs based on user role
+    tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator"]
+    if user_is_authorized_or_admin:
+        tab_list.append("📈 Stocks Setting Up")
+    tab_list.extend(["🎛️ User-defined controls", "ℹ️ User Guide"])
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
         
@@ -1764,14 +1665,22 @@ def _run_streamlit_ui():
     
     tab_screener = tabs[0]
     tab_portfolio = tabs[1]
-    tab_setting_up = tabs[2]
-    tab_controls = tabs[3]
-    tab_guide = tabs[4]
-    tab_admin = tabs[5] if user_is_admin else None
+    
+    current_tab_idx = 2
+    if user_is_authorized_or_admin:
+        tab_setting_up = tabs[current_tab_idx]
+        current_tab_idx += 1
+    else:
+        tab_setting_up = None
+        
+    tab_controls = tabs[current_tab_idx]
+    current_tab_idx += 1
+    tab_guide = tabs[current_tab_idx]
+    current_tab_idx += 1
+    tab_admin = tabs[current_tab_idx] if user_is_admin else None
 
     # ==================================================================================
     # TAB 1: STOCK SCREENER
-
     # ==================================================================================
     with tab_screener:
         st.subheader("Screener universe")
@@ -1872,9 +1781,6 @@ def _run_streamlit_ui():
                 st.warning("Select at least one ticker.")
             else:
                 if force_refresh:
-                    # Targeted clear — only price/info caches, NOT the universe-list caches
-                    # (which are expensive 24h-cached NSE fetches and shouldn't be wiped
-                    # just because the user wants fresh prices).
                     fetch_daily.clear()
                     fetch_info.clear()
                 with st.spinner("Running quantitative scan..."):
@@ -1930,7 +1836,6 @@ def _run_streamlit_ui():
                     else:
                         st.info("No tickers match this score threshold.")
                 st.divider()
-                # Screening Table
                 st.subheader("📋 Screening Results Table")
                 st.info("💡 Select a holding below or choose a symbol to inspect its detailed pillar breakdown.")
                 display_table = df[[
@@ -2001,7 +1906,6 @@ def _run_streamlit_ui():
 
     # ==================================================================================
     # TAB 2: PORTFOLIO EVALUATOR
-
     # ==================================================================================
     with tab_portfolio:
         st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
@@ -2148,63 +2052,124 @@ def _run_streamlit_ui():
             )
 
     # ==================================================================================
-    # TAB 3: STOCKS SETTING UP (Visible to all, locked for non-admins)
+    # TAB 3: STOCKS SETTING UP (Authorized/Admin Only)
     # ==================================================================================
-    with tab_setting_up:
-        st.subheader("📈 Stocks Setting Up")
-        
-        # Check authorization right here in the tab UI
-        if not user_is_admin:
-            st.error("🔒 **Access Denied:** This technical scanning engine is restricted to authorized Administrator accounts only.")
-            st.info("To use this feature, please log in with your administrator email.")
-        else:
-            st.markdown("Specify the Top 'N' stocks from your ranking lists to build the scan universe.")
+    if tab_setting_up is not None:
+        with tab_setting_up:
+            st.subheader("📈 Stocks Setting Up")
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                n_nifty = st.number_input("Top Nifty 50", min_value=0, max_value=50, value=10)
-            with col2:
-                n_next50 = st.number_input("Top Next 50", min_value=0, max_value=50, value=15)
-            with col3:
-                n_smallcap = st.number_input("Top Smallcap 250", min_value=0, max_value=250, value=25)
-                
+            col_doc, col_empty = st.columns([1, 4])
+            with col_doc:
+                if st.button("📚 Setup Logic Documentation", use_container_width=True):
+                    show_setup_documentation_modal()
+            
+            st.caption("⚠️ **Disclaimer:** These are setups based exclusively on technical indicators. The user must do proper due diligence and risk assessment before committing money in the market.")
             st.divider()
-
-            if st.button("Run Setup Scan", type="primary", key="btn_run_setups"):
-                with st.spinner("Fetching universe and calculating setups..."):
-                    # Use your actual NSE list fetchers
-                    nifty_list = load_index_list("Nifty 50")[:n_nifty]
-                    next50_list = load_index_list("Nifty Next 50")[:n_next50]
-                    smallcap_list = load_index_list("Nifty Smallcap 250")[:n_smallcap]
-                    universe_tickers = list(set(nifty_list + next50_list + smallcap_list))
-                    
-                    if not universe_tickers:
-                        st.warning("No tickers selected for the universe.")
+            
+            # Dynamic Universe Selection (Mirrors Tab 1)
+            universe_source_su = st.selectbox(
+                "Universe Source",
+                options=UNIVERSE_SOURCE_OPTIONS,
+                index=UNIVERSE_SOURCE_OPTIONS.index("Nifty 500"),
+                key="su_universe_source",
+                help="Select the NSE index or list to scan for setups.",
+            )
+            with st.status(f"Loading {universe_source_su}...", expanded=False) as _status_su:
+                if universe_source_su == "F&O Stocks":
+                    base_list_su = load_fo_stocks()
+                else:
+                    base_list_su = load_index_list(universe_source_su)
+                _status_su.update(label=f"{universe_source_su}: {len(base_list_su)} tickers loaded", state="complete")
+            
+            with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
+                uploaded_csv_su = st.file_uploader(
+                    "Upload Universe File",
+                    type=["csv", "xlsx", "xls"],
+                    key="su_csv",
+                    label_visibility="collapsed",
+                )
+            
+            csv_tickers_su = []
+            if uploaded_csv_su is not None:
+                try:
+                    if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
+                        csv_df_su = pd.read_excel(uploaded_csv_su)
                     else:
-                        st.write(f"Scanning **{len(universe_tickers)}** top-ranked stocks for technical setups...")
+                        csv_df_su = pd.read_csv(uploaded_csv_su)
+                    csv_tickers_su = parse_broker_symbols(csv_df_su)
+                    if csv_tickers_su:
+                        st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
+                    else:
+                        st.error("Could not detect a symbol column in the uploaded file.")
+                except Exception as e:
+                    st.error(f"Error parsing universe file: {e}")
+            
+            full_options_su = list(dict.fromkeys(base_list_su + csv_tickers_su))
+            default_selection_su = csv_tickers_su if csv_tickers_su else base_list_su
+            
+            selected_universe_su = st.multiselect(
+                "Active Tickers",
+                options=full_options_su,
+                default=default_selection_su,
+                key=f"su_active_tickers::{universe_source_su}",
+                help="Tickers that will be scanned for setups."
+            )
+            
+            custom_raw_su = st.text_input(
+                "Add Custom Tickers",
+                value="",
+                key="su_custom",
+                help="Extra NSE symbols, comma-separated."
+            )
+            custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
+            
+            universe_su = list(dict.fromkeys(selected_universe_su + custom_tickers_su))
+            
+            force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False, key="su_force")
+
+            if st.button("Run Scan", type="primary", key="btn_run_setups"):
+                if not universe_su:
+                    st.warning("Select at least one ticker.")
+                else:
+                    if force_refresh_su:
+                        fetch_daily.clear()
+                        fetch_info.clear()
                         
-                        progress_bar = st.progress(0)
-                        setup_results = []
+                    st.write(f"Scanning **{len(universe_su)}** stocks for technical setups...")
+                    progress_bar = st.progress(0)
+                    setup_results = []
+                    
+                    for i, ticker in enumerate(universe_su):
+                        df = fetch_daily(ticker)
+                        if df is not None and not df.empty:
+                            triggered_tags = check_stocks_setting_up(df)
+                            if triggered_tags:
+                                setup_results.append({
+                                    "Ticker": ticker.replace('.NS', ''),
+                                    "LTP": round(df['Close'].iloc[-1], 2),
+                                    "Setups Triggered": " | ".join(triggered_tags)
+                                })
+                        progress_bar.progress((i + 1) / len(universe_su))
                         
-                        for i, ticker in enumerate(universe_tickers):
-                            df = fetch_daily(ticker)
-                            if df is not None and not df.empty:
-                                triggered_tags = check_stocks_setting_up(df)
-                                if triggered_tags:
-                                    setup_results.append({
-                                        "Ticker": ticker.replace('.NS', ''),
-                                        "LTP": round(df['Close'].iloc[-1], 2),
-                                        "Setups Triggered": " | ".join(triggered_tags)
-                                    })
-                            progress_bar.progress((i + 1) / len(universe_tickers))
+                    st.success("Scan Complete!")
+                    
+                    if setup_results:
+                        results_df_su = pd.DataFrame(setup_results)
+                        
+                        st.divider()
+                        st.subheader("📈 TradingView 1-Click Clipboard Exporter")
+                        tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
+                        tv_content_su = ",".join(tv_symbols_su)
+                        
+                        st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
+                        if tv_symbols_su:
+                            st.code(tv_content_su, language="text")
                             
-                        st.success("Scan Complete!")
-                        
-                        if setup_results:
-                            results_df = pd.DataFrame(setup_results)
-                            st.dataframe(results_df, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No stocks in the selected universe triggered a setup today. The market might be choppy or extended.")
+                        st.divider()
+                        st.subheader("📋 Results Table")
+                        st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No stocks in the selected universe triggered a setup today. The market might be choppy or extended.")
 
     # ==================================================================================
     # TAB 4: USER GUIDE
@@ -2434,7 +2399,6 @@ def _run_streamlit_ui():
 
     # ==================================================================================
     # TAB 5: ADMIN PANEL (DYNAMIC ROLE-BASED)
-
     # ==================================================================================
     if user_is_admin and tab_admin is not None:
         with tab_admin:
@@ -2475,8 +2439,7 @@ def _run_streamlit_ui():
                             lst = load_index_list(name)
                             is_fallback = lst == FALLBACK_INDEX_LISTS.get(name)
                             status_rows.append({"Source": name, "Tickers": len(lst), "Using Fallback?": "⚠️ Yes" if is_fallback else "✅ Live"})
-                        # For F&O, identify which tier actually succeeded (bypassing the
-                        # cache so this reflects the current live state, not yesterday's).
+                        
                         fo_tier_used = "None — using fallback"
                         fo_tickers = []
                         for tier_name, tier_fn in [
@@ -2505,7 +2468,6 @@ def _run_streamlit_ui():
             
                 if supabase:
                     try:
-                        # Retrieve all registered accounts directly from public.profiles table
                         session = st.session_state.get("supabase_session")
                         if session and hasattr(session, "access_token"):
                             supabase.postgrest.auth(session.access_token)
@@ -2521,11 +2483,38 @@ def _run_streamlit_ui():
                                 })
                     except Exception as e:
                         st.error(f"Error reading profiles table: {e}")
+                
                 if user_list:
                     st.dataframe(pd.DataFrame(user_list), use_container_width=True, hide_index=True)
                     st.caption(f"Total Registered Users Located: **{len(user_list)}**")
+                    
+                    st.divider()
+                    st.markdown("#### 🔐 User Authorization Management")
+                    st.caption("Grant users 'Authorized' status to unlock the 'Stocks Setting Up' module.")
+                    
+                    user_options = { f"{u['Email']} (Role: {u['Role']})": u['User ID'] for u in user_list }
+                    selected_user_label = st.selectbox("Select User to Modify:", options=list(user_options.keys()), key="admin_auth_user")
+                    
+                    if selected_user_label:
+                        selected_uid = user_options[selected_user_label]
+                        c_auth1, c_auth2 = st.columns(2)
+                        with c_auth1:
+                            if st.button("Grant 'Authorized' Access", use_container_width=True):
+                                try:
+                                    supabase.table("profiles").update({"role": "authorized"}).eq("id", selected_uid).execute()
+                                    st.success("User authorized! (Refresh page to see changes)")
+                                except Exception as e:
+                                    st.error(f"Error updating user: {e}")
+                        with c_auth2:
+                            if st.button("Revoke Access (Set to 'user')", use_container_width=True):
+                                try:
+                                    supabase.table("profiles").update({"role": "user"}).eq("id", selected_uid).execute()
+                                    st.success("User access revoked! (Refresh page to see changes)")
+                                except Exception as e:
+                                    st.error(f"Error updating user: {e}")
                 else:
                     st.info("ℹ️ No users found in `profiles` table. Make sure you ran the SQL trigger setup in Supabase Editor.")
+            
             st.divider()
             st.markdown("#### 🗄️ Database Record Inspection (`user_settings`)")
             if supabase:
@@ -2538,7 +2527,6 @@ def _run_streamlit_ui():
 
     # ----------------------------------------------------------------------------------
     # Footer
-
     # ----------------------------------------------------------------------------------
     st.divider()
     st.caption(
