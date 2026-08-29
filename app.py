@@ -187,6 +187,10 @@ BROKER_SYMBOL_HEADERS = [
     "ticker", "company name", "stock name", "stock", "scrip name", "display name"
 ]
 
+@st.cache_resource
+def _get_freshness_tracker() -> dict:
+    return {}
+
 # ----------------------------------------------------------------------------------
 # Helper Functions
 # ----------------------------------------------------------------------------------
@@ -360,7 +364,6 @@ def get_supabase_client():
     return None
 
 def is_admin(user) -> bool:
-    """Strict Role Check for 'admin' only"""
     if not user:
         return False
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
@@ -383,7 +386,6 @@ def is_admin(user) -> bool:
     return False
 
 def is_authorized_or_admin(user) -> bool:
-    """Broad Role Check for either 'admin' or 'authorized'"""
     if not user:
         return False
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
@@ -601,14 +603,12 @@ AUTH_COOKIE = "funtech_sid"
 AUTH_DIR = Path(__file__).resolve().parent / "data" / "auth_sessions"
 STAY_SIGNED_IN_SECONDS = 30 * 24 * 60 * 60
 
-
 def _valid_auth_sid(sid: str) -> bool:
     try:
         uuid.UUID(str(sid))
         return True
     except Exception:
         return False
-
 
 def _auth_cookie_secure_flag() -> str:
     try:
@@ -618,7 +618,6 @@ def _auth_cookie_secure_flag() -> str:
     except Exception:
         pass
     return ""
-
 
 def _flush_auth_cookie_js() -> None:
     pending = st.session_state.pop("_auth_cookie", None)
@@ -637,7 +636,6 @@ def _flush_auth_cookie_js() -> None:
         )
     st.components.v1.html(f"<script>{script}</script>", height=0)
 
-
 def _read_auth_sid() -> str:
     try:
         sid = str(st.context.cookies.get(AUTH_COOKIE) or "").strip()
@@ -645,14 +643,12 @@ def _read_auth_sid() -> str:
         return ""
     return sid if _valid_auth_sid(sid) else ""
 
-
 def _write_stay_session(payload: dict) -> str:
     AUTH_DIR.mkdir(parents=True, exist_ok=True)
     sid = str(uuid.uuid4())
     (AUTH_DIR / f"{sid}.json").write_text(json.dumps(payload), encoding="utf-8")
     st.session_state["_auth_cookie"] = {"sid": sid, "max_age": STAY_SIGNED_IN_SECONDS}
     return sid
-
 
 def _clear_stay_session() -> None:
     sid = _read_auth_sid()
@@ -664,14 +660,12 @@ def _clear_stay_session() -> None:
             pass
     st.session_state["_auth_cookie"] = {"sid": "", "max_age": 0}
 
-
 def _session_tokens(session) -> tuple[str, str]:
     if session is None:
         return "", ""
     if isinstance(session, dict):
         return str(session.get("access_token") or ""), str(session.get("refresh_token") or "")
     return str(getattr(session, "access_token", "") or ""), str(getattr(session, "refresh_token", "") or "")
-
 
 def _persist_login_if_requested(user, session) -> None:
     if not st.session_state.get("stay_signed_in", True):
@@ -686,7 +680,6 @@ def _persist_login_if_requested(user, session) -> None:
         _write_stay_session({"mode": "supabase", "access_token": access, "refresh_token": refresh, "email": email, "id": uid})
         return
     _write_stay_session({"mode": "bypass", "email": email, "id": uid or "local-dev-id"})
-
 
 def _try_restore_stay_signed_in() -> None:
     if st.session_state.get("user"):
@@ -728,7 +721,6 @@ def _try_restore_stay_signed_in() -> None:
         except Exception:
             pass
 
-
 def init_auth_session():
     if "user" not in st.session_state:
         st.session_state["user"] = None
@@ -763,6 +755,7 @@ def render_login_screen():
             _persist_login_if_requested(st.session_state["user"], None)
             st.rerun()
         return False
+        
     col1, col2 = st.columns([1, 1])
     with col1:
         st.subheader("Account Access")
@@ -811,6 +804,7 @@ def render_login_screen():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
+                    
         elif auth_mode == "Sign Up":
             if st.button(
                 "Create Account",
@@ -827,19 +821,58 @@ def render_login_screen():
                     st.success("Account created! Check your email or log in.")
                 except Exception as e:
                     st.error(f"Sign up failed: {e}")
-        elif auth_mode == "Reset Password":
-            if st.button(
-                "Send Reset Email",
-                use_container_width=True,
-                type="primary",
-                help="Send a password recovery link to your registered email address.",
-            ):
-                try:
-                    supabase.auth.reset_password_for_email(email)
-                    st.success("Password reset email sent! Please check your inbox.")
-                except Exception as e:
-                    st.error(f"Failed to send reset email: {e}")
                     
+        elif auth_mode == "Reset Password":
+            if "reset_email_sent" not in st.session_state:
+                st.session_state["reset_email_sent"] = False
+
+            if not st.session_state["reset_email_sent"]:
+                if st.button(
+                    "Send Reset Code",
+                    use_container_width=True,
+                    type="primary",
+                    help="Send a 6-digit password recovery code to your registered email address.",
+                ):
+                    if not email:
+                        st.warning("Please enter your email address first.")
+                    else:
+                        try:
+                            supabase.auth.reset_password_for_email(email)
+                            st.session_state["reset_email_sent"] = True
+                            st.session_state["reset_email"] = email
+                            st.success("Reset code sent! Please check your inbox.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to send reset email: {e}")
+            else:
+                st.info(f"Enter the 6-digit code sent to **{st.session_state.get('reset_email')}**")
+                otp_code = st.text_input("6-Digit Reset Code", key="reset_otp")
+                new_password = st.text_input("New Password", type="password", key="reset_new_pass")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Update Password", use_container_width=True, type="primary"):
+                        if not otp_code or not new_password:
+                            st.warning("Please enter both the 6-digit code and your new password.")
+                        else:
+                            try:
+                                supabase.auth.verify_otp({
+                                    "email": st.session_state["reset_email"], 
+                                    "token": otp_code, 
+                                    "type": "recovery"
+                                })
+                                supabase.auth.update_user({"password": new_password})
+                                
+                                st.success("Password updated successfully! You can now log in.")
+                                st.session_state["reset_email_sent"] = False
+                                supabase.auth.sign_out()
+                            except Exception as e:
+                                st.error(f"Error resetting password: {e}")
+                with col_btn2:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state["reset_email_sent"] = False
+                        st.rerun()
+
     with col2:
         st.markdown(
             """
@@ -851,213 +884,6 @@ def render_login_screen():
             """
         )
     return False
-
-def _nse_session(referer: str) -> requests.Session:
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": referer,
-    })
-    session.get(referer, timeout=6)
-    return session
-
-def _fo_tier1_stock_indices() -> list:
-    for _ in range(2):
-        try:
-            session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
-            resp = session.get(
-                "https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O",
-                timeout=8,
-            )
-            if resp.status_code == 200:
-                rows = resp.json().get("data", [])
-                tickers = sorted(set(
-                    f"{r['symbol'].strip().upper()}.NS" for r in rows
-                    if r.get("symbol") and not r["symbol"].upper().startswith("NIFTY")
-                ))
-                if len(tickers) >= 100:
-                    return tickers
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return []
-
-def _fo_tier2_equity_master() -> list:
-    try:
-        session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
-        resp = session.get("https://www.nseindia.com/api/equity-master", timeout=8)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, dict):
-                tickers = set()
-                for key, val in data.items():
-                    key_norm = key.lower().replace("&", "").replace(" ", "").replace("_", "")
-                    if "fo" in key_norm or "fno" in key_norm or "futuresoptions" in key_norm:
-                        if isinstance(val, list):
-                            for s in val:
-                                if isinstance(s, str) and s.strip() and not s.upper().startswith("NIFTY"):
-                                    tickers.add(f"{s.strip().upper()}.NS")
-                tickers = sorted(tickers)
-                if len(tickers) >= 100:
-                    return tickers
-    except Exception:
-        pass
-    return []
-
-def _parse_fo_mktlots_csv(text: str) -> list:
-    lines = text.splitlines()
-    start_idx = next((i for i, ln in enumerate(lines) if "derivatives on individual securities" in ln.lower()), None)
-    if start_idx is None or start_idx + 1 >= len(lines):
-        return []
-    header = next(csv.reader([lines[start_idx + 1]]))
-    symbol_col = next((i for i, h in enumerate(header) if h.strip().lower() == "symbol"), None)
-    if symbol_col is None:
-        return []
-    tickers = set()
-    symbol_pattern = re.compile(r"^[A-Z0-9&\-]{1,20}$")
-    for line in lines[start_idx + 2:]:
-        if not line.strip():
-            break
-        row = next(csv.reader([line]))
-        if len(row) <= symbol_col:
-            continue
-        sym = row[symbol_col].strip().upper()
-        if sym and symbol_pattern.match(sym) and not sym.startswith("NIFTY"):
-            tickers.add(f"{sym}.NS")
-    return sorted(tickers)
-
-def _fo_tier3_dated_csv() -> list:
-    today = date.today()
-    candidate_dates = set()
-    for months_back in range(2):
-        year, month = today.year, today.month - months_back
-        while month <= 0:
-            month += 12
-            year -= 1
-        if month == 12:
-            last_day = date(year, 12, 31)
-        else:
-            last_day = date(year, month + 1, 1) - timedelta(days=1)
-        for offset in range(-3, 2): 
-            candidate_dates.add(last_day + timedelta(days=offset))
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for d in sorted(candidate_dates, reverse=True):
-        url = f"https://nsearchives.nseindia.com/content/fo/fo_mktlots_{d.strftime('%d%m%Y')}.csv"
-        try:
-            resp = requests.get(url, headers=headers, timeout=5)
-            if resp.status_code == 200 and "symbol" in resp.text.lower():
-                tickers = _parse_fo_mktlots_csv(resp.text)
-                if len(tickers) >= 100:
-                    return tickers
-        except Exception:
-            continue
-    return []
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_index_list(index_name: str) -> list:
-    filename = NSE_INDEX_FILES.get(index_name)
-    if not filename:
-        return []
-    urls = [
-        f"https://nsearchives.nseindia.com/content/indices/{filename}.csv",
-        f"https://archives.nseindia.com/content/indices/{filename}.csv",
-    ]
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for url in urls:
-        try:
-            df = pd.read_csv(url, storage_options=headers)
-            symbol_col = next((c for c in df.columns if c.strip().lower() == "symbol"), None)
-            if symbol_col:
-                tickers = [f"{str(s).strip().upper()}.NS" for s in df[symbol_col].dropna().tolist() if str(s).strip()]
-                if tickers:
-                    _get_freshness_tracker()[f"universe:{index_name}"] = (pd.Timestamp.now(), "live")
-                    return tickers
-        except Exception:
-            continue
-    _get_freshness_tracker()[f"universe:{index_name}"] = (pd.Timestamp.now(), "fallback")
-    return FALLBACK_INDEX_LISTS.get(index_name, [])
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_fo_stocks() -> list:
-    for tier_fn in (_fo_tier1_stock_indices, _fo_tier2_equity_master, _fo_tier3_dated_csv):
-        tickers = tier_fn()
-        if tickers:
-            _get_freshness_tracker()["universe:F&O Stocks"] = (pd.Timestamp.now(), "live")
-            return tickers
-    _get_freshness_tracker()["universe:F&O Stocks"] = (pd.Timestamp.now(), "fallback")
-    return FALLBACK_FO_STOCKS
-
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
-    for attempt in range(retries):
-        try:
-            df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
-            if df is None or df.empty or len(df) < 30:
-                time.sleep(0.3)
-                continue
-            required_cols = ["Open", "High", "Low", "Close", "Volume"]
-            if not all(col in df.columns for col in required_cols):
-                continue
-            df.index = pd.to_datetime(df.index)
-            df = df[required_cols].copy().replace([np.inf, -np.inf], np.nan).dropna()
-            if len(df) >= 30:
-                _get_freshness_tracker()["prices"] = pd.Timestamp.now()
-                return df
-        except Exception:
-            time.sleep(0.3)
-    return None
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_info(ticker: str) -> dict:
-    default_info = {
-        "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
-        "revenueGrowth": None, "fiftyTwoWeekHigh": None,
-        "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
-        "sector": None,
-    }
-    try:
-        t = yf.Ticker(ticker)
-        try:
-            default_info["fiftyTwoWeekHigh"] = t.fast_info.get("year_high")
-            default_info["currentPrice"] = t.fast_info.get("last_price")
-        except Exception:
-            pass
-        try:
-            q_fin = t.quarterly_financials
-            q_inc = None
-            try:
-                q_inc = t.quarterly_income_stmt
-            except Exception:
-                q_inc = None
-            default_info["quarterly_eps_yoy"] = _yoy_latest_vs_year_ago(
-                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
-                ["diluted eps", "diluted earnings per share", "basic eps", "eps"],
-            )
-            default_info["quarterly_ni_yoy"] = _yoy_latest_vs_year_ago(
-                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
-                ["net income"],
-            )
-            default_info["quarterly_rev_yoy"] = _yoy_latest_vs_year_ago(
-                q_fin if q_fin is not None and not getattr(q_fin, "empty", True) else None,
-                ["total revenue", "operating revenue", "revenue"],
-            )
-        except Exception:
-            pass
-        try:
-            raw_info = t.info
-            if isinstance(raw_info, dict):
-                for k, v in raw_info.items():
-                    if default_info.get(k) is None and v is not None:
-                        default_info[k] = v
-        except Exception:
-            pass
-    except Exception:
-        pass
-    if not default_info.get("sector"):
-        default_info["sector"] = SYMBOL_SECTOR_MAP.get(ticker, "Unknown")
-    return default_info
 
 # ----------------------------------------------------------------------------------
 # Dialog Modals
@@ -1246,7 +1072,6 @@ def check_stocks_setting_up(df):
     monthly = resample_ohlc(df, "ME")
 
     # SETUP 1: Multi-Timeframe Pullback (DW & WM variants)
-    # DW Logic (Daily Stoch / Weekly MACD)
     daily_cross_below_60 = False
     if len(df) >= 5:
         for i in range(1, 4):
@@ -2194,7 +2019,6 @@ def _run_streamlit_ui():
 
             if st.button("Run Scan", type="primary", key="btn_run_setups"):
                 
-                # 1. Gather all unique tickers from selected sources
                 all_tickers_su = []
                 for univ in selected_universes_su:
                     if univ == "F&O Stocks":
@@ -2214,13 +2038,11 @@ def _run_streamlit_ui():
                         fetch_info.clear()
                         
                     with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
-                        # 2. Rank them using the existing CANSLIM/Tech scoring engine
                         ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
                     
                     if ranked_df_su.empty:
                         st.error("Could not retrieve price data to rank the selected stocks.")
                     else:
-                        # 3. Take the Top N
                         top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
                         top_tickers_list = top_ranked_df["Ticker"].tolist()
                         
@@ -2228,7 +2050,6 @@ def _run_streamlit_ui():
                         progress_bar = st.progress(0)
                         setup_results = []
                         
-                        # 4. Check for Setups ONLY in the Top N
                         for i, ticker in enumerate(top_tickers_list):
                             df = fetch_daily(ticker)
                             if df is not None and not df.empty:
@@ -2354,7 +2175,6 @@ def _run_streamlit_ui():
                 st.subheader("🏆 Top Scores Preview")
                 st.caption(f"Scored {preview.get('ticker_count', 0)} unique tickers.")
                 
-                # Render the HTML directly in the page flow
                 st.components.v1.html(preview.get("html") or "", height=480, scrolling=True)
                 if preview.get("outbox_path"):
                     st.caption(f"Also saved to `{preview.get('outbox_path')}`.")
@@ -2375,7 +2195,6 @@ def _run_streamlit_ui():
                 else:
                     st.info("No top-score tickers to copy.")
                     
-                # Layout the dismiss and email buttons beneath the inline preview
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     if st.button("Close Preview", use_container_width=True):
