@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+import pandas_ta as ta
 
 def _in_streamlit() -> bool:
     try:
@@ -228,11 +229,7 @@ FALLBACK_INDEX_LISTS = {
     ],
 }
 # Fallback for F&O eligible stocks — used only if NSE's live JSON API is unreachable.
-# This is a manually curated approximation (~180 names) of the F&O universe, spanning
-# all major sectors. NSE reviews F&O eligibility quarterly, so treat this as a safety
-# net, not a source of truth — the live fetch is always tried first.
 FALLBACK_FO_STOCKS = [
-    # Nifty 50 + large caps
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "BHARTIARTL.NS",
     "ITC.NS", "LT.NS", "SBIN.NS", "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS",
     "M&M.NS", "SUNPHARMA.NS", "TATAMOTORS.NS", "KOTAKBANK.NS", "ULTRACEMCO.NS", "TITAN.NS",
@@ -241,37 +238,21 @@ FALLBACK_FO_STOCKS = [
     "GRASIM.NS", "TECHM.NS", "INDUSINDBK.NS", "CIPLA.NS", "SBILIFE.NS", "HDFCLIFE.NS",
     "DRREDDY.NS", "APOLLOHOSP.NS", "BRITANNIA.NS", "EICHERMOT.NS", "DIVISLAB.NS", "HINDALCO.NS",
     "BPCL.NS", "TATACONSUM.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS", "ADANIPORTS.NS",
-    "TRENT.NS", "ONGC.NS",
-    # Banks, NBFCs & financials
-    "DLF.NS", "PNB.NS", "BANKBARODA.NS", "CANBK.NS", "IDFCFIRSTB.NS", "FEDERALBNK.NS",
+    "TRENT.NS", "ONGC.NS", "DLF.NS", "PNB.NS", "BANKBARODA.NS", "CANBK.NS", "IDFCFIRSTB.NS", "FEDERALBNK.NS",
     "AUBANK.NS", "PFC.NS", "RECLTD.NS", "IRFC.NS", "MFSL.NS", "CHOLAFIN.NS",
     "ICICIGI.NS", "ICICIPRULI.NS", "LICHSGFIN.NS", "BANDHANBNK.NS", "PEL.NS", "MUTHOOTFIN.NS",
     "SBICARD.NS", "M&MFIN.NS", "IDBI.NS", "IEX.NS", "CDSL.NS", "BSE.NS", "ANGELONE.NS",
-    "IIFL.NS", "POONAWALLA.NS", "PNBHOUSING.NS",
-    # IT & tech
-    "LTIM.NS", "MPHASIS.NS", "PERSISTENT.NS", "COFORGE.NS", "LTTS.NS", "OFSS.NS", "TATAELXSI.NS",
-    # Auto & auto ancillary
+    "IIFL.NS", "POONAWALLA.NS", "PNBHOUSING.NS", "LTIM.NS", "MPHASIS.NS", "PERSISTENT.NS", "COFORGE.NS", "LTTS.NS", "OFSS.NS", "TATAELXSI.NS",
     "TVSMOTOR.NS", "ASHOKLEY.NS", "BOSCHLTD.NS", "MOTHERSON.NS", "BALKRISIND.NS", "MRF.NS",
-    "EXIDEIND.NS", "BHARATFORG.NS", "TIINDIA.NS", "APOLLOTYRE.NS",
-    # Metals, mining, materials & energy
-    "VEDL.NS", "NMDC.NS", "SAIL.NS", "JINDALSTEL.NS", "NATIONALUM.NS", "HINDCOPPER.NS",
+    "EXIDEIND.NS", "BHARATFORG.NS", "TIINDIA.NS", "APOLLOTYRE.NS", "VEDL.NS", "NMDC.NS", "SAIL.NS", "JINDALSTEL.NS", "NATIONALUM.NS", "HINDCOPPER.NS",
     "GAIL.NS", "IOC.NS", "PETRONET.NS", "IGL.NS", "ATGL.NS", "ADANIENSOL.NS", "ADANIGREEN.NS",
-    "ADANIPOWER.NS", "TATAPOWER.NS", "NHPC.NS", "SJVN.NS",
-    # Cement & construction
-    "AMBUJACEM.NS", "SHREECEM.NS", "ACC.NS", "JKCEMENT.NS", "DALBHARAT.NS", "IRCTC.NS",
+    "ADANIPOWER.NS", "TATAPOWER.NS", "NHPC.NS", "SJVN.NS", "AMBUJACEM.NS", "SHREECEM.NS", "ACC.NS", "JKCEMENT.NS", "DALBHARAT.NS", "IRCTC.NS",
     "RVNL.NS", "HAL.NS", "BEL.NS", "BHEL.NS", "CUMMINSIND.NS", "SIEMENS.NS", "ABB.NS",
-    "POLYCAB.NS", "HAVELLS.NS",
-    # Pharma & healthcare
-    "AUROPHARMA.NS", "LUPIN.NS", "TORNTPHARM.NS", "ALKEM.NS", "BIOCON.NS", "ZYDUSLIFE.NS",
-    "GLENMARK.NS", "LAURUSLABS.NS", "IPCALAB.NS", "MANKIND.NS",
-    # Consumer, FMCG & retail
-    "GODREJCP.NS", "DABUR.NS", "MARICO.NS", "COLPAL.NS", "UBL.NS", "MCDOWELL-N.NS",
+    "POLYCAB.NS", "HAVELLS.NS", "AUROPHARMA.NS", "LUPIN.NS", "TORNTPHARM.NS", "ALKEM.NS", "BIOCON.NS", "ZYDUSLIFE.NS",
+    "GLENMARK.NS", "LAURUSLABS.NS", "IPCALAB.NS", "MANKIND.NS", "GODREJCP.NS", "DABUR.NS", "MARICO.NS", "COLPAL.NS", "UBL.NS", "MCDOWELL-N.NS",
     "PIDILITIND.NS", "PAGEIND.NS", "VBL.NS", "JUBLFOOD.NS", "DMART.NS", "NYKAA.NS",
-    # Realty
     "GODREJPROP.NS", "OBEROIRLTY.NS", "LODHA.NS", "PHOENIXLTD.NS", "PRESTIGE.NS",
-    # New-age / digital
     "ZOMATO.NS", "PAYTM.NS", "POLICYBZR.NS", "NAUKRI.NS", "DELHIVERY.NS",
-    # Others frequently in F&O
     "PIIND.NS", "SRF.NS", "UPL.NS", "GNFC.NS", "DEEPAKNTR.NS", "AARTIIND.NS",
     "VOLTAS.NS", "CONCOR.NS", "GMRAIRPORT.NS", "INDIGO.NS", "TRIDENT.NS", "SUNTV.NS",
     "PVRINOX.NS", "ESCORTS.NS", "SYNGENE.NS", "ABFRL.NS", "IDEA.NS", "GRANULES.NS",
@@ -279,11 +260,6 @@ FALLBACK_FO_STOCKS = [
     "BALRAMCHIN.NS", "NAVINFLUOR.NS", "TATACOMM.NS", "ASTRAL.NS", "SUPREMEIND.NS",
     "APLAPOLLO.NS", "HINDPETRO.NS", "RAMCOCEM.NS", "METROPOLIS.NS", "LALPATHLAB.NS",
 ]
-# Static ticker -> sector fallback, used only when yfinance's .info genuinely omits
-# 'sector' (common for many NSE mid/small-caps). Uses the same sector taxonomy as
-# SECTOR_MAP above (Financial Services, Technology, etc.) so display stays consistent.
-# Not exhaustive — a "best effort" reference table to reduce "Unknown" sightings,
-# built from the same groupings used for FALLBACK_FO_STOCKS above.
 SYMBOL_SECTOR_MAP = {}
 
 def _register_sector(sector_name: str, tickers: list):
@@ -1271,6 +1247,91 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
     hist = macd_line - signal_line
     return pd.DataFrame({"MACD": macd_line, "MACDh": hist, "MACDs": signal_line})
 
+def check_stocks_setting_up(df):
+    """
+    Evaluates a single stock's dataframe against the 5 Setup Engine rules.
+    Returns a list of tags for the setups that triggered.
+    """
+    if df is None or len(df) < 60:
+        return []
+        
+    try:
+        stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=14, d=3, smooth_k=3)
+        df['STOCH_K'] = stoch['STOCHk_14_3_3']
+        df['STOCH_D'] = stoch['STOCHd_14_3_3']
+        
+        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
+        df['MACD_Line'] = macd['MACD_12_26_9']
+        
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        
+        df['EMA_20'] = ta.ema(df['Close'], length=20)
+        df['SMA_50'] = ta.sma(df['Close'], length=50)
+        df['Vol_20_SMA'] = ta.sma(df['Volume'], length=20)
+    except:
+        return []
+        
+    today = df.iloc[-1]
+    yest = df.iloc[-2]
+    tags = []
+    
+    # SETUP 1: Multi-Timeframe Pullback
+    macd_sloping_up = today['MACD_Line'] > yest['MACD_Line']
+    recent_cross_below_60 = False
+    
+    for i in range(1, 4):
+        curr_k = df['STOCH_K'].iloc[-i]
+        curr_d = df['STOCH_D'].iloc[-i]
+        prev_k = df['STOCH_K'].iloc[-(i+1)]
+        prev_d = df['STOCH_D'].iloc[-(i+1)]
+        
+        if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
+            recent_cross_below_60 = True
+            break
+            
+    if macd_sloping_up and recent_cross_below_60:
+        tags.append("✔️ Pullback")
+
+    # SETUP 2: Breakout Retest
+    lookback = 40
+    resistance = df['High'].iloc[-lookback-5:-5].max() 
+    recent_breakout = df.iloc[-5:]['Close'].max() > resistance
+    
+    resting_near_res = (resistance * 0.97) <= today['Close'] <= (resistance * 1.03)
+    quiet_volume = today['Volume'] < today['Vol_20_SMA']
+    
+    if recent_breakout and resting_near_res and quiet_volume:
+        tags.append("✔️ Breakout Retest")
+
+    # SETUP 3: RSI Momentum Resumption
+    rsi_hit_high = df['RSI'].iloc[-20:-5].max() >= 60
+    rsi_cooled = df['RSI'].iloc[-5:-1].min() < 55
+    rsi_curling_up = yest['RSI'] < 55 and today['RSI'] >= 55
+    price_confirming = today['Close'] > yest['Close']
+    
+    if rsi_hit_high and rsi_cooled and rsi_curling_up and price_confirming:
+        tags.append("✔️ RSI Resumption")
+
+    # SETUP 4: Volatility Squeeze
+    inside_day_1 = (yest['High'] < df.iloc[-3]['High']) and (yest['Low'] > df.iloc[-3]['Low'])
+    inside_day_2 = (today['High'] < yest['High']) and (today['Low'] > yest['Low'])
+    vol_dry_up = today['Volume'] < (today['Vol_20_SMA'] * 0.6)
+    
+    if inside_day_1 and inside_day_2 and vol_dry_up:
+        tags.append("✔️ Vol Squeeze")
+
+    # SETUP 5: 20-EMA Trend Bounce
+    strong_trend = today['EMA_20'] > today['SMA_50']
+    touched_ema = today['Low'] <= today['EMA_20'] and today['Close'] > today['EMA_20']
+    
+    daily_range = today['High'] - today['Low']
+    closed_strong = today['Close'] > (today['Low'] + (daily_range * 0.5))
+    
+    if strong_trend and touched_ema and closed_strong:
+        tags.append("✔️ 20-EMA Bounce")
+
+    return tags
+
 def _yoy_latest_vs_year_ago(df: pd.DataFrame | None, needles: list[str]) -> float | None:
     """(latest quarter − quarter ~1y ago) / |year-ago|, Yahoo columns newest-first."""
     if df is None or getattr(df, "empty", True) or getattr(df, "shape", (0, 0))[1] < 5:
@@ -1688,15 +1749,25 @@ def _run_streamlit_ui():
     w_fund = int(st.session_state.get("w_fund", 5))
     w_tech = int(st.session_state.get("w_tech", 5))
 
-    tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "🎛️ User-defined controls", "ℹ️ User Guide"]
+    # CHANGED: The "Stocks Setting Up" tab is now ALWAYS visible in the array.
+    tab_list = [
+        "🔍 Stock Screener", 
+        "💼 Portfolio Evaluator", 
+        "📈 Stocks Setting Up", 
+        "🎛️ User-defined controls", 
+        "ℹ️ User Guide"
+    ]
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
+        
     tabs = st.tabs(tab_list)
+    
     tab_screener = tabs[0]
     tab_portfolio = tabs[1]
-    tab_controls = tabs[2]
-    tab_guide = tabs[3]
-    tab_admin = tabs[4] if user_is_admin else None
+    tab_setting_up = tabs[2]
+    tab_controls = tabs[3]
+    tab_guide = tabs[4]
+    tab_admin = tabs[5] if user_is_admin else None
 
     # ==================================================================================
     # TAB 1: STOCK SCREENER
@@ -1835,134 +1906,6 @@ def _run_streamlit_ui():
                     help="Mean Total across the screened set. Use it to see how demanding your weights and rules are.",
                 )
                 st.divider()
-                # Sector-level summary — quickly see which sectors are showing strength
-                # in this scan, without scrolling the full ticker-by-ticker table.
-                # ==========================================================================
-                # DISABLED (commented out by request) — SECTOR SUMMARY VIEW
-                # To re-enable: uncomment this block.
-                # ==========================================================================
-                # with st.expander("📊 Sector Summary", expanded=False):
-                    # sector_summary = (
-                        # df.groupby("Sector")
-                        # .agg(
-                            # Tickers=("Ticker", "count"),
-                            # **{
-                                # "Avg Total": ("Total Score", "mean"),
-                                # "Avg Fund": ("Fundamental Score", "mean"),
-                                # "Avg Tech": ("Technical Score", "mean"),
-                                # "Avg RS": ("Relative Strength Score", "mean"),
-                            # },
-                        # )
-                        # .round(2)
-                        # .sort_values("Avg Total", ascending=False)
-                        # .reset_index()
-                    # )
-                    # st.dataframe(
-                        # sector_summary,
-                        # use_container_width=True,
-                        # hide_index=True,
-                        # column_config={
-                            # "Avg Total": st.column_config.NumberColumn("Avg Total", format="%.2f"),
-                            # "Avg Fund": st.column_config.NumberColumn("Avg Fund", format="%.2f"),
-                            # "Avg Tech": st.column_config.NumberColumn("Avg Tech", format="%.2f"),
-                            # "Avg RS": st.column_config.NumberColumn("Avg RS", format="%.2f"),
-                        # },
-                    # )
-                    # if (df["Sector"] == "Unknown").any():
-                        # _unk_count = int((df["Sector"] == "Unknown").sum())
-                        # st.caption(f"ℹ️ {_unk_count} ticker(s) have no sector data and are grouped under 'Unknown'.")
-                # ==========================================================================
-                # END DISABLED — SECTOR SUMMARY VIEW
-                # ==========================================================================
-                st.divider()
-                # Historical Validation (Backtest) — scoped honestly to the Technical
-                # score only. yfinance only exposes CURRENT fundamentals (no
-                # point-in-time history), so Fundamental/RS can't be reconstructed
-                # for a past date without misleadingly mixing today's fundamentals
-                # into a "historical" score. Technical score, by contrast, can be
-                # correctly recomputed from price history alone at any past cutoff.
-                # ==========================================================================
-                # DISABLED (commented out by request) — HISTORICAL VALIDATION (BACKTEST)
-                # To re-enable: uncomment this block. Also uncomment the line in
-                # execute_scan() that populates st.session_state['scan_raw_daily'],
-                # if that was also disabled.
-                # ==========================================================================
-                # with st.expander("🔬 Historical Validation (Technical Score Backtest)", expanded=False):
-                    # st.caption(
-                        # "Checks whether stocks with a higher **Technical Score** at some point in the past "
-                        # "went on to perform better since then. Uses the price history already fetched in this "
-                        # "session's scan — no extra API calls. Limited to the Technical score only: Fundamental "
-                        # "and Relative Strength can't be reconstructed for a past date since yfinance only "
-                        # "exposes current-day fundamentals, not historical point-in-time data."
-                    # )
-                    # _raw_daily = st.session_state.get("scan_raw_daily", {})
-                    # if not _raw_daily:
-                        # st.info("Run a scan above first — this reuses that scan's price data.")
-                    # else:
-                        # _lookback_options = {"1 Month Ago": 21, "3 Months Ago": 63, "6 Months Ago": 126}
-                        # _lb_label = st.selectbox("Look back to:", options=list(_lookback_options.keys()), index=1, key="bt_lookback")
-                        # _lb_days = _lookback_options[_lb_label]
-                        # if st.button("▶️ Run Historical Validation", key="bt_run_btn"):
-                            # bt_rows = []
-                            # for _tkr, _daily_full in _raw_daily.items():
-                                # if _daily_full is None or len(_daily_full) < _lb_days + 60:
-                                    # continue  # not enough history before AND after the cutoff
-                                # _daily_hist = _daily_full.iloc[:-_lb_days]
-                                # _tech_score_hist, _, _ = compute_technical_score(_daily_hist)
-                                # _price_cutoff = _daily_hist["Close"].iloc[-1]
-                                # _price_now = _daily_full["Close"].iloc[-1]
-                                # _fwd_return = (_price_now / _price_cutoff - 1) * 100
-                                # bt_rows.append({
-                                    # "Ticker": _tkr,
-                                    # "Tech Score (at cutoff)": _tech_score_hist,
-                                    # "Forward Return %": round(_fwd_return, 2),
-                                # })
-                            # if len(bt_rows) < 5:
-                                # st.warning(
-                                    # f"Only {len(bt_rows)} ticker(s) had enough price history for this lookback "
-                                    # f"period — try a shorter lookback or a larger universe for a meaningful sample."
-                                # )
-                            # else:
-                                # bt_df = pd.DataFrame(bt_rows)
-                                # bt_df["Score Bucket"] = pd.cut(
-                                    # bt_df["Tech Score (at cutoff)"],
-                                    # bins=[0, 2, 4, 6, 8, 10], include_lowest=True,
-                                    # labels=["0-2", "2-4", "4-6", "6-8", "8-10"],
-                                # )
-                                # bucket_summary = (
-                                    # bt_df.groupby("Score Bucket", observed=True)
-                                    # .agg(Tickers=("Ticker", "count"), **{"Avg Forward Return %": ("Forward Return %", "mean")})
-                                    # .round(2)
-                                # )
-                                # corr = bt_df["Tech Score (at cutoff)"].corr(bt_df["Forward Return %"])
-                                # m1, m2 = st.columns(2)
-                                # m1.metric("Sample Size", len(bt_df))
-                                # m2.metric(
-                                    # "Correlation (Score vs Forward Return)", f"{corr:.2f}",
-                                    # help="Ranges -1 to +1. Positive means higher technical scores historically "
-                                         # "preceded better forward returns in this sample. Close to 0 means little "
-                                         # "or no relationship. This is a small, single-run sample — treat as a "
-                                         # "rough directional signal, not statistical proof.",
-                                # )
-                                # st.write(f"**Average forward return by score bucket** ({_lb_label} → now):")
-                                # st.bar_chart(bucket_summary["Avg Forward Return %"])
-                                # st.dataframe(bucket_summary.reset_index(), use_container_width=True, hide_index=True)
-                                # with st.popover("View raw per-ticker data"):
-                                    # st.dataframe(
-                                        # bt_df.sort_values("Tech Score (at cutoff)", ascending=False),
-                                        # use_container_width=True, hide_index=True,
-                                    # )
-                                # st.caption(
-                                    # "⚠️ This is a single historical sample from one universe/date, not a robust "
-                                    # "walk-forward backtest — it doesn't account for survivorship bias (delisted "
-                                    # "stocks aren't in yfinance), transaction costs, or multiple time periods. "
-                                    # "Treat it as a sanity check, not a guarantee."
-                                # )
-                # ==========================================================================
-                # END DISABLED — HISTORICAL VALIDATION (BACKTEST)
-                # ==========================================================================
-                st.divider()
-                # TradingView Exporter
                 st.subheader("📈 TradingView 1-Click Clipboard Exporter")
                 col_tv1, col_tv2 = st.columns([1, 2])
             
@@ -1994,17 +1937,7 @@ def _run_streamlit_ui():
                     "Ticker", "Total Score", "Fundamental Score",
                     "Technical Score", "Tech Passed", "CANSLIM Hits", "Sector"
                 ]].copy()
-                # ==========================================================================
-                # DISABLED (commented out by request) — WATCHLIST STAR BUTTON
-                # To re-enable: uncomment the 4-column layout below (and comment out the
-                # plain 3-column line that currently replaces it), plus the c_ctrl4 block.
-                # ==========================================================================
-                # if SUPABASE_AVAILABLE:
-                #     c_ctrl1, c_ctrl2, c_ctrl3, c_ctrl4 = st.columns([2, 2, 1, 1])
-                # else:
-                #     c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 2, 1])
                 c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([2, 2, 1])
-                # ==========================================================================
                 with c_ctrl1:
                     selected_ticker = st.selectbox(
                         "Select Stock to Inspect:",
@@ -2024,24 +1957,6 @@ def _run_streamlit_ui():
                     ):
                         st.session_state["active_inspect_ticker"] = selected_ticker
                         st.rerun()
-                # ==========================================================================
-                # if SUPABASE_AVAILABLE:
-                #     with c_ctrl4:
-                #         _wl = st.session_state.get("watchlist_cache")
-                #         if _wl is None:
-                #             _wl = get_watchlist()
-                #             st.session_state["watchlist_cache"] = _wl
-                #         is_starred = selected_ticker in _wl
-                #         if st.button("★ Unstar" if is_starred else "☆ Star", key="scr_star_btn", use_container_width=True):
-                #             ok = remove_from_watchlist(selected_ticker) if is_starred else add_to_watchlist(selected_ticker)
-                #             if ok:
-                #                 st.session_state["watchlist_cache"] = None  # force refresh next render
-                #                 st.rerun()
-                #             else:
-                #                 st.error("Couldn't update watchlist — has supabase_migration.sql been run?")
-                # ==========================================================================
-                # END DISABLED — WATCHLIST STAR BUTTON
-                # ==========================================================================
                 st.dataframe(
                     display_table,
                     use_container_width=True,
@@ -2233,8 +2148,66 @@ def _run_streamlit_ui():
             )
 
     # ==================================================================================
-    # TAB 3: USER GUIDE
+    # TAB 3: STOCKS SETTING UP (Visible to all, locked for non-admins)
+    # ==================================================================================
+    with tab_setting_up:
+        st.subheader("📈 Stocks Setting Up")
+        
+        # Check authorization right here in the tab UI
+        if not user_is_admin:
+            st.error("🔒 **Access Denied:** This technical scanning engine is restricted to authorized Administrator accounts only.")
+            st.info("To use this feature, please log in with your administrator email.")
+        else:
+            st.markdown("Specify the Top 'N' stocks from your ranking lists to build the scan universe.")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                n_nifty = st.number_input("Top Nifty 50", min_value=0, max_value=50, value=10)
+            with col2:
+                n_next50 = st.number_input("Top Next 50", min_value=0, max_value=50, value=15)
+            with col3:
+                n_smallcap = st.number_input("Top Smallcap 250", min_value=0, max_value=250, value=25)
+                
+            st.divider()
 
+            if st.button("Run Setup Scan", type="primary", key="btn_run_setups"):
+                with st.spinner("Fetching universe and calculating setups..."):
+                    # Use your actual NSE list fetchers
+                    nifty_list = load_index_list("Nifty 50")[:n_nifty]
+                    next50_list = load_index_list("Nifty Next 50")[:n_next50]
+                    smallcap_list = load_index_list("Nifty Smallcap 250")[:n_smallcap]
+                    universe_tickers = list(set(nifty_list + next50_list + smallcap_list))
+                    
+                    if not universe_tickers:
+                        st.warning("No tickers selected for the universe.")
+                    else:
+                        st.write(f"Scanning **{len(universe_tickers)}** top-ranked stocks for technical setups...")
+                        
+                        progress_bar = st.progress(0)
+                        setup_results = []
+                        
+                        for i, ticker in enumerate(universe_tickers):
+                            df = fetch_daily(ticker)
+                            if df is not None and not df.empty:
+                                triggered_tags = check_stocks_setting_up(df)
+                                if triggered_tags:
+                                    setup_results.append({
+                                        "Ticker": ticker.replace('.NS', ''),
+                                        "LTP": round(df['Close'].iloc[-1], 2),
+                                        "Setups Triggered": " | ".join(triggered_tags)
+                                    })
+                            progress_bar.progress((i + 1) / len(universe_tickers))
+                            
+                        st.success("Scan Complete!")
+                        
+                        if setup_results:
+                            results_df = pd.DataFrame(setup_results)
+                            st.dataframe(results_df, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No stocks in the selected universe triggered a setup today. The market might be choppy or extended.")
+
+    # ==================================================================================
+    # TAB 4: USER GUIDE
     # ==================================================================================
     with tab_controls:
         st.subheader("User-defined controls")
@@ -2460,7 +2433,7 @@ def _run_streamlit_ui():
             )
 
     # ==================================================================================
-    # TAB 4: ADMIN PANEL (DYNAMIC ROLE-BASED)
+    # TAB 5: ADMIN PANEL (DYNAMIC ROLE-BASED)
 
     # ==================================================================================
     if user_is_admin and tab_admin is not None:
