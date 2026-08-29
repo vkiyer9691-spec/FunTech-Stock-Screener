@@ -834,219 +834,6 @@ def render_login_screen():
         )
     return False
 
-@st.cache_resource
-def _get_freshness_tracker() -> dict:
-    return {}
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_index_list(index_name: str) -> list:
-    filename = NSE_INDEX_FILES.get(index_name)
-    if not filename:
-        return []
-    urls = [
-        f"https://nsearchives.nseindia.com/content/indices/{filename}.csv",
-        f"https://archives.nseindia.com/content/indices/{filename}.csv",
-    ]
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for url in urls:
-        try:
-            df = pd.read_csv(url, storage_options=headers)
-            symbol_col = next((c for c in df.columns if c.strip().lower() == "symbol"), None)
-            if symbol_col:
-                tickers = [f"{str(s).strip().upper()}.NS" for s in df[symbol_col].dropna().tolist() if str(s).strip()]
-                if tickers:
-                    _get_freshness_tracker()[f"universe:{index_name}"] = (pd.Timestamp.now(), "live")
-                    return tickers
-        except Exception:
-            continue
-    _get_freshness_tracker()[f"universe:{index_name}"] = (pd.Timestamp.now(), "fallback")
-    return FALLBACK_INDEX_LISTS.get(index_name, [])
-
-def _nse_session(referer: str) -> requests.Session:
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": referer,
-    })
-    session.get(referer, timeout=6)
-    return session
-
-def _fo_tier1_stock_indices() -> list:
-    for _ in range(2):
-        try:
-            session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
-            resp = session.get(
-                "https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O",
-                timeout=8,
-            )
-            if resp.status_code == 200:
-                rows = resp.json().get("data", [])
-                tickers = sorted(set(
-                    f"{r['symbol'].strip().upper()}.NS" for r in rows
-                    if r.get("symbol") and not r["symbol"].upper().startswith("NIFTY")
-                ))
-                if len(tickers) >= _FO_MIN_PLAUSIBLE_COUNT:
-                    return tickers
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return []
-
-def _fo_tier2_equity_master() -> list:
-    try:
-        session = _nse_session("https://www.nseindia.com/market-data/live-equity-market")
-        resp = session.get("https://www.nseindia.com/api/equity-master", timeout=8)
-        if resp.status_code == 200:
-            data = resp.json()
-            if isinstance(data, dict):
-                tickers = set()
-                for key, val in data.items():
-                    key_norm = key.lower().replace("&", "").replace(" ", "").replace("_", "")
-                    if "fo" in key_norm or "fno" in key_norm or "futuresoptions" in key_norm:
-                        if isinstance(val, list):
-                            for s in val:
-                                if isinstance(s, str) and s.strip() and not s.upper().startswith("NIFTY"):
-                                    tickers.add(f"{s.strip().upper()}.NS")
-                tickers = sorted(tickers)
-                if len(tickers) >= _FO_MIN_PLAUSIBLE_COUNT:
-                    return tickers
-    except Exception:
-        pass
-    return []
-
-def _parse_fo_mktlots_csv(text: str) -> list:
-    lines = text.splitlines()
-    start_idx = next((i for i, ln in enumerate(lines) if "derivatives on individual securities" in ln.lower()), None)
-    if start_idx is None or start_idx + 1 >= len(lines):
-        return []
-    header = next(csv.reader([lines[start_idx + 1]]))
-    symbol_col = next((i for i, h in enumerate(header) if h.strip().lower() == "symbol"), None)
-    if symbol_col is None:
-        return []
-    tickers = set()
-    symbol_pattern = re.compile(r"^[A-Z0-9&\-]{1,20}$")
-    for line in lines[start_idx + 2:]:
-        if not line.strip():
-            break
-        row = next(csv.reader([line]))
-        if len(row) <= symbol_col:
-            continue
-        sym = row[symbol_col].strip().upper()
-        if sym and symbol_pattern.match(sym) and not sym.startswith("NIFTY"):
-            tickers.add(f"{sym}.NS")
-    return sorted(tickers)
-
-def _fo_tier3_dated_csv() -> list:
-    today = date.today()
-    candidate_dates = set()
-    for months_back in range(2):
-        year, month = today.year, today.month - months_back
-        while month <= 0:
-            month += 12
-            year -= 1
-        if month == 12:
-            last_day = date(year, 12, 31)
-        else:
-            last_day = date(year, month + 1, 1) - timedelta(days=1)
-        for offset in range(-3, 2): 
-            candidate_dates.add(last_day + timedelta(days=offset))
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for d in sorted(candidate_dates, reverse=True):
-        url = f"https://nsearchives.nseindia.com/content/fo/fo_mktlots_{d.strftime('%d%m%Y')}.csv"
-        try:
-            resp = requests.get(url, headers=headers, timeout=5)
-            if resp.status_code == 200 and "symbol" in resp.text.lower():
-                tickers = _parse_fo_mktlots_csv(resp.text)
-                if len(tickers) >= _FO_MIN_PLAUSIBLE_COUNT:
-                    return tickers
-        except Exception:
-            continue
-    return []
-@st.cache_data(ttl=86400, show_spinner=False)
-
-def load_fo_stocks() -> list:
-    for tier_fn in (_fo_tier1_stock_indices, _fo_tier2_equity_master, _fo_tier3_dated_csv):
-        tickers = tier_fn()
-        if tickers:
-            _get_freshness_tracker()["universe:F&O Stocks"] = (pd.Timestamp.now(), "live")
-            return tickers
-    _get_freshness_tracker()["universe:F&O Stocks"] = (pd.Timestamp.now(), "fallback")
-    return FALLBACK_FO_STOCKS
-
-UNIVERSE_SOURCE_OPTIONS = list(NSE_INDEX_FILES.keys()) + ["F&O Stocks"]
-@st.cache_data(ttl=1800, show_spinner=False)
-
-def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
-    for attempt in range(retries):
-        try:
-            df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
-            if df is None or df.empty or len(df) < 30:
-                time.sleep(0.3)
-                continue
-            required_cols = ["Open", "High", "Low", "Close", "Volume"]
-            if not all(col in df.columns for col in required_cols):
-                continue
-            df.index = pd.to_datetime(df.index)
-            df = df[required_cols].copy().replace([np.inf, -np.inf], np.nan).dropna()
-            if len(df) >= 30:
-                _get_freshness_tracker()["prices"] = pd.Timestamp.now()
-                return df
-        except Exception:
-            time.sleep(0.3)
-    return None
-@st.cache_data(ttl=3600, show_spinner=False)
-
-def fetch_info(ticker: str) -> dict:
-    default_info = {
-        "earningsGrowth": None, "earningsQuarterlyGrowth": None, 
-        "revenueGrowth": None, "fiftyTwoWeekHigh": None,
-        "currentPrice": None, "regularMarketPrice": None, "heldPercentInstitutions": None,
-        "sector": None,
-    }
-    try:
-        t = yf.Ticker(ticker)
-        try:
-            default_info["fiftyTwoWeekHigh"] = t.fast_info.get("year_high")
-            default_info["currentPrice"] = t.fast_info.get("last_price")
-        except Exception:
-            pass
-        try:
-            q_fin = t.quarterly_financials
-            q_inc = None
-            try:
-                q_inc = t.quarterly_income_stmt
-            except Exception:
-                q_inc = None
-            default_info["quarterly_eps_yoy"] = _yoy_latest_vs_year_ago(
-                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
-                ["diluted eps", "diluted earnings per share", "basic eps", "eps"],
-            )
-            default_info["quarterly_ni_yoy"] = _yoy_latest_vs_year_ago(
-                q_inc if q_inc is not None and not getattr(q_inc, "empty", True) else q_fin,
-                ["net income"],
-            )
-            default_info["quarterly_rev_yoy"] = _yoy_latest_vs_year_ago(
-                q_fin if q_fin is not None and not getattr(q_fin, "empty", True) else None,
-                ["total revenue", "operating revenue", "revenue"],
-            )
-        except Exception:
-            pass
-        try:
-            raw_info = t.info
-            if isinstance(raw_info, dict):
-                for k, v in raw_info.items():
-                    if default_info.get(k) is None and v is not None:
-                        default_info[k] = v
-        except Exception:
-            pass
-    except Exception:
-        pass
-    if not default_info.get("sector"):
-        default_info["sector"] = SYMBOL_SECTOR_MAP.get(ticker, "Unknown")
-    return default_info
-
 # ----------------------------------------------------------------------------------
 # Dialog Modals
 # ----------------------------------------------------------------------------------
@@ -1512,7 +1299,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     sector_returns = {}
     progress = None
     
-    if _in_streamlit():
+    if _in_streamlit() and show_progress:
         progress = st.progress(0, text="Fetching stock data...")
         
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -2093,20 +1880,23 @@ def _run_streamlit_ui():
             st.caption("⚠️ **Disclaimer:** These are setups based exclusively on technical indicators. The user must do proper due diligence and risk assessment before committing money in the market.")
             st.divider()
             
-            # Dynamic Universe Selection (Mirrors Tab 1)
-            universe_source_su = st.selectbox(
-                "Universe Source",
-                options=UNIVERSE_SOURCE_OPTIONS,
-                index=UNIVERSE_SOURCE_OPTIONS.index("Nifty 500"),
-                key="su_universe_source",
-                help="Select the NSE index or list to scan for setups.",
-            )
-            with st.status(f"Loading {universe_source_su}...", expanded=False) as _status_su:
-                if universe_source_su == "F&O Stocks":
-                    base_list_su = load_fo_stocks()
-                else:
-                    base_list_su = load_index_list(universe_source_su)
-                _status_su.update(label=f"{universe_source_su}: {len(base_list_su)} tickers loaded", state="complete")
+            st.markdown("Specify the universes, custom CSVs, or tickers you want to scan. We will rank them using your active Fundamental/Technical weights, take the **Top N**, and hunt for technical setups.")
+            
+            col_u1, col_u2 = st.columns([2, 1])
+            with col_u1:
+                selected_universes_su = st.multiselect(
+                    "Select Universes",
+                    options=UNIVERSE_SOURCE_OPTIONS,
+                    default=["Nifty 50"],
+                    key="su_univ_multi",
+                    help="You can select multiple index lists or F&O stocks at once."
+                )
+            with col_u2:
+                top_n_su = st.number_input(
+                    "Top N Stocks to Scan for Setups", 
+                    min_value=1, max_value=1000, value=50, 
+                    help="We will rank the combined list and only look for setups in the top N."
+                )
             
             with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
                 uploaded_csv_su = st.file_uploader(
@@ -2131,17 +1921,6 @@ def _run_streamlit_ui():
                 except Exception as e:
                     st.error(f"Error parsing universe file: {e}")
             
-            full_options_su = list(dict.fromkeys(base_list_su + csv_tickers_su))
-            default_selection_su = csv_tickers_su if csv_tickers_su else base_list_su
-            
-            selected_universe_su = st.multiselect(
-                "Active Tickers",
-                options=full_options_su,
-                default=default_selection_su,
-                key=f"su_active_tickers::{universe_source_su}",
-                help="Tickers that will be scanned for setups."
-            )
-            
             custom_raw_su = st.text_input(
                 "Add Custom Tickers",
                 value="",
@@ -2150,53 +1929,77 @@ def _run_streamlit_ui():
             )
             custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
             
-            universe_su = list(dict.fromkeys(selected_universe_su + custom_tickers_su))
-            
             force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False, key="su_force")
 
             if st.button("Run Scan", type="primary", key="btn_run_setups"):
-                if not universe_su:
-                    st.warning("Select at least one ticker.")
+                
+                # 1. Gather all unique tickers from selected sources
+                all_tickers_su = []
+                for univ in selected_universes_su:
+                    if univ == "F&O Stocks":
+                        all_tickers_su.extend(load_fo_stocks())
+                    else:
+                        all_tickers_su.extend(load_index_list(univ))
+                
+                all_tickers_su.extend(csv_tickers_su)
+                all_tickers_su.extend(custom_tickers_su)
+                all_tickers_su = list(set(all_tickers_su)) # Remove duplicates
+                
+                if not all_tickers_su:
+                    st.warning("No tickers found. Please select a universe, upload a CSV, or add custom tickers.")
                 else:
                     if force_refresh_su:
                         fetch_daily.clear()
                         fetch_info.clear()
                         
-                    st.write(f"Scanning **{len(universe_su)}** stocks for technical setups...")
-                    progress_bar = st.progress(0)
-                    setup_results = []
+                    with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
+                        # 2. Rank them using the existing CANSLIM/Tech scoring engine
+                        ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
                     
-                    for i, ticker in enumerate(universe_su):
-                        df = fetch_daily(ticker)
-                        if df is not None and not df.empty:
-                            triggered_tags = check_stocks_setting_up(df)
-                            if triggered_tags:
-                                setup_results.append({
-                                    "Ticker": ticker.replace('.NS', ''),
-                                    "LTP": round(df['Close'].iloc[-1], 2),
-                                    "Setups Triggered": " | ".join(triggered_tags)
-                                })
-                        progress_bar.progress((i + 1) / len(universe_su))
-                        
-                    st.success("Scan Complete!")
-                    
-                    if setup_results:
-                        results_df_su = pd.DataFrame(setup_results)
-                        
-                        st.divider()
-                        st.subheader("📈 TradingView 1-Click Clipboard Exporter")
-                        tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
-                        tv_content_su = ",".join(tv_symbols_su)
-                        
-                        st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
-                        if tv_symbols_su:
-                            st.code(tv_content_su, language="text")
-                            
-                        st.divider()
-                        st.subheader("📋 Results Table")
-                        st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                    if ranked_df_su.empty:
+                        st.error("Could not retrieve price data to rank the selected stocks.")
                     else:
-                        st.info("No stocks in the selected universe triggered a setup today. The market might be choppy or extended.")
+                        # 3. Take the Top N
+                        top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
+                        top_tickers_list = top_ranked_df["Ticker"].tolist()
+                        
+                        st.write(f"Hunting for technical setups within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
+                        progress_bar = st.progress(0)
+                        setup_results = []
+                        
+                        # 4. Check for Setups ONLY in the Top N
+                        for i, ticker in enumerate(top_tickers_list):
+                            df = fetch_daily(ticker)
+                            if df is not None and not df.empty:
+                                triggered_tags = check_stocks_setting_up(df)
+                                if triggered_tags:
+                                    setup_results.append({
+                                        "Ticker": ticker.replace('.NS', ''),
+                                        "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
+                                        "LTP": round(df['Close'].iloc[-1], 2),
+                                        "Setups Triggered": " | ".join(triggered_tags)
+                                    })
+                            progress_bar.progress((i + 1) / len(top_tickers_list))
+                            
+                        st.success("Setup Scan Complete!")
+                        
+                        if setup_results:
+                            results_df_su = pd.DataFrame(setup_results)
+                            
+                            st.divider()
+                            st.subheader("📈 TradingView 1-Click Clipboard Exporter")
+                            tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
+                            tv_content_su = ",".join(tv_symbols_su)
+                            
+                            st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
+                            if tv_symbols_su:
+                                st.code(tv_content_su, language="text")
+                                
+                            st.divider()
+                            st.subheader("📋 Stocks Setting Up")
+                            st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"None of the Top {top_n_su} ranked stocks triggered a setup today. The market might be choppy or extended.")
 
     # ==================================================================================
     # TAB 4: USER GUIDE
