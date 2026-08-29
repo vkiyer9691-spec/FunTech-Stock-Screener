@@ -1120,7 +1120,6 @@ def fetch_info(ticker: str) -> dict:
 
 # ----------------------------------------------------------------------------------
 @st.dialog("⚙️ Customize Fundamental Parameters")
-
 def customize_fundamental_modal():
     st.write("Select CANSLIM criteria to include:")
     for k, label in DEFAULT_FUND_PARAMS.items():
@@ -1137,8 +1136,8 @@ def customize_fundamental_modal():
     if col2.button("Apply & Save", key="apply_fund", help="Store these toggles for scans and the daily top-scores email."):
         save_user_settings_to_db()
         st.rerun()
-@st.dialog("⚙️ Customize Technical Parameters")
 
+@st.dialog("⚙️ Customize Technical Parameters")
 def customize_technical_modal():
     st.write("Select rules to include in Technical Score:")
     for k, label in DEFAULT_TECH_PARAMS.items():
@@ -1154,36 +1153,6 @@ def customize_technical_modal():
         st.rerun()
     if col2.button("Apply & Save", key="apply_tech", help="Store these toggles for scans and the daily top-scores email."):
         save_user_settings_to_db()
-        st.rerun()
-
-@st.dialog("Top scores", width="large")
-def show_digest_preview_modal(preview: dict):
-    from digest import tradingview_watchlist
-
-    st.caption(
-        f"Scored {preview.get('ticker_count', 0)} unique tickers. "
-        "This window stays open so you can copy the TradingView list. Close it with Done when you are finished."
-    )
-    st.components.v1.html(preview.get("html") or "", height=480, scrolling=True)
-    if preview.get("outbox_path"):
-        st.caption(f"Also saved to `{preview.get('outbox_path')}`.")
-
-    st.subheader("📈 TradingView")
-    st.caption(
-        "Every top-score name from all index/group lists in this preview "
-        "(Nifty 50, Next 50, Midcap, Smallcap, Nifty 500, F&O — whichever were scored). "
-        "A stock that appears in more than one list is included once. Copy the NSE:SYMBOL string into TradingView."
-    )
-    tv_content = tradingview_watchlist(preview.get("sections") or [])
-    tv_symbols = [part for part in tv_content.split(",") if part] if tv_content else []
-    st.write(f"**{len(tv_symbols)} unique tickers** across all lists. Copy below ➡️")
-    if tv_symbols:
-        st.code(tv_content, language="text")
-    else:
-        st.info("No top-score tickers to copy.")
-
-    if st.button("Done", type="primary", use_container_width=True, help="Close this preview. It will not appear again until you generate a new one."):
-        st.session_state["digest_preview_open"] = False
         st.rerun()
 
 def show_pillar_details_modal(row_data):
@@ -1545,15 +1514,18 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     stock_data = {}
     sector_returns = {}
     progress = None
-    if show_progress and _in_streamlit():
+    
+    # Always show the progress bar if rendering inside the Streamlit web app
+    if _in_streamlit():
         progress = st.progress(0, text="Fetching stock data...")
+        
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(fetch_single_stock, tkr): tkr for tkr in ticker_list}
         completed = 0
         for future in as_completed(futures):
             completed += 1
             if progress:
-                progress.progress(completed / len(ticker_list), text=f"Processing universe... ({completed}/{len(ticker_list)})")
+                progress.progress(completed / len(ticker_list), text=f"Scanning {completed} of {len(ticker_list)} tickers")
             elif show_progress:
                 print(f"Digest scan {completed}/{len(ticker_list)}", flush=True)
             tkr, daily, info = future.result()
@@ -1715,9 +1687,6 @@ def _run_streamlit_ui():
 
     w_fund = int(st.session_state.get("w_fund", 5))
     w_tech = int(st.session_state.get("w_tech", 5))
-
-    if st.session_state.get("digest_preview_open") and st.session_state.get("digest_preview"):
-        show_digest_preview_modal(st.session_state["digest_preview"])
 
     tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "🎛️ User-defined controls", "ℹ️ User Guide"]
     if user_is_admin:
@@ -2331,40 +2300,78 @@ def _run_streamlit_ui():
             key="digest_quick_preview",
             help="Uncheck to score every live universe. That can take several minutes.",
         )
+        
         if st.button(
             "Show top scores",
             use_container_width=True,
-            help="Score the selected lists and open a preview, including a TradingView copy of the top names across all indices.",
+            help="Score the selected lists and open an inline preview below, including a TradingView copy of the top names across all indices.",
         ):
             from digest import run_digest
-            with st.spinner("Scoring universes..."):
-                digest_result = run_digest(
-                    quick=bool(digest_quick),
-                    send=False,
-                    extra_recipients=[],
-                    top_n=int(st.session_state.get("digest_top_n") or 10),
-                    skip_weekends=False,
-                    settings=_snapshot_engine(),
-                )
+            
+            digest_result = run_digest(
+                quick=bool(digest_quick),
+                send=False,
+                extra_recipients=[],
+                top_n=int(st.session_state.get("digest_top_n") or 10),
+                skip_weekends=False,
+                settings=_snapshot_engine(),
+            )
             st.session_state["digest_preview"] = digest_result
-            st.session_state["digest_preview_open"] = digest_result.get("status") == "ok"
-            if digest_result.get("status") == "ok":
-                st.success("Preview opened. Copy the TradingView list there, then click Done.")
-            else:
-                st.warning(digest_result.get("status"))
-        if st.session_state.get("digest_opt_in") and st.session_state.get("digest_preview"):
-            from digest import is_smtp_configured, send_email
-            if is_smtp_configured() and st.button(
-                "Send preview to my email",
-                use_container_width=True,
-                help="Send the last preview HTML to the address on this login. Uses SMTP from secrets, not GitHub Actions.",
-            ):
-                html = st.session_state["digest_preview"].get("html") or ""
-                status = send_email(user_email, "FunTech top scores (preview)", html)
-                if status == "sent":
-                    st.success(f"Sent to {user_email}")
+            
+        if st.session_state.get("digest_preview"):
+            preview = st.session_state["digest_preview"]
+            if preview.get("status") == "ok":
+                st.divider()
+                st.subheader("🏆 Top Scores Preview")
+                st.caption(f"Scored {preview.get('ticker_count', 0)} unique tickers.")
+                
+                # Render the HTML directly in the page flow
+                st.components.v1.html(preview.get("html") or "", height=480, scrolling=True)
+                if preview.get("outbox_path"):
+                    st.caption(f"Also saved to `{preview.get('outbox_path')}`.")
+
+                st.subheader("📈 TradingView")
+                st.caption(
+                    "Every top-score name from all index/group lists in this preview "
+                    "(Nifty 50, Next 50, Midcap, Smallcap, Nifty 500, F&O — whichever were scored). "
+                    "A stock that appears in more than one list is included once. Copy the NSE:SYMBOL string into TradingView."
+                )
+                from digest import tradingview_watchlist
+                tv_content = tradingview_watchlist(preview.get("sections") or [])
+                tv_symbols = [part for part in tv_content.split(",") if part] if tv_content else []
+                st.write(f"**{len(tv_symbols)} unique tickers** across all lists. Copy below ➡️")
+                
+                if tv_symbols:
+                    st.code(tv_content, language="text")
                 else:
-                    st.info(f"Not sent ({status}). HTML is in digest_outbox/.")
+                    st.info("No top-score tickers to copy.")
+                    
+                # Layout the dismiss and email buttons beneath the inline preview
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Close Preview", use_container_width=True):
+                        st.session_state.pop("digest_preview", None)
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.session_state.get("digest_opt_in"):
+                        from digest import is_smtp_configured, send_email
+                        if is_smtp_configured() and st.button(
+                            "Send preview to my email",
+                            use_container_width=True,
+                            help="Send the last preview HTML to the address on this login. Uses SMTP from secrets, not GitHub Actions.",
+                        ):
+                            html = preview.get("html") or ""
+                            status = send_email(user_email, "FunTech top scores (preview)", html)
+                            if status == "sent":
+                                st.success(f"Sent to {user_email}")
+                            else:
+                                st.info(f"Not sent ({status}). HTML is in digest_outbox/.")
+            else:
+                st.warning(preview.get("status"))
+                if st.button("Dismiss", key="dismiss_warning"):
+                    st.session_state.pop("digest_preview", None)
+                    st.rerun()
 
     with tab_guide:
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
