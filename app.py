@@ -524,8 +524,8 @@ def save_scan_history(results_df: pd.DataFrame):
             supabase.table("scan_history").insert(rows[i:i + chunk_size]).execute()
     except Exception:
         pass
-
 @st.cache_data(ttl=300, show_spinner=False)
+
 def _load_scan_history_cached(user_id: str, ticker: str, _supabase_url: str) -> pd.DataFrame:
     supabase = get_supabase_client()
     if not supabase or not user_id:
@@ -609,6 +609,7 @@ def _valid_auth_sid(sid: str) -> bool:
     except Exception:
         return False
 
+
 def _auth_cookie_secure_flag() -> str:
     try:
         url = str(getattr(st.context, "url", "") or "")
@@ -617,6 +618,7 @@ def _auth_cookie_secure_flag() -> str:
     except Exception:
         pass
     return ""
+
 
 def _flush_auth_cookie_js() -> None:
     pending = st.session_state.pop("_auth_cookie", None)
@@ -1148,8 +1150,9 @@ def show_setup_documentation_modal():
     st.markdown("""
     ### 5-Setup Engine Rules Breakdown
     
-    **1. Multi-Timeframe Pullback**
-    Stochastic K crosses D below 60 within the last 3 days, backed by a MACD line sloping upwards. Captures healthy pullbacks in strong momentum stocks.
+    **1. Multi-Timeframe Pullback (DW & WM)**
+    - **Daily/Weekly (DW):** Daily Stochastic (K) crosses above D below 60 within the last 3 days, backed by a Weekly MACD line sloping upwards.
+    - **Weekly/Monthly (WM):** Weekly Stochastic (K) crosses above D below 60 within the last 3 weeks, backed by a Monthly MACD line sloping upwards.
     
     **2. Breakout Retest**
     Price broke its 40-day high within the last 5 days on above-average volume, and is now resting quietly within 3% of that breakout line on lower volume. Identifies low-risk entries on prior resistance turning into support.
@@ -1215,9 +1218,6 @@ def check_stocks_setting_up(df):
         df['STOCH_K'] = stoch['STOCHk_14_3_3']
         df['STOCH_D'] = stoch['STOCHd_14_3_3']
         
-        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        df['MACD_Line'] = macd['MACD_12_26_9']
-        
         df['RSI'] = ta.rsi(df['Close'], length=14)
         
         df['EMA_20'] = ta.ema(df['Close'], length=20)
@@ -1230,19 +1230,59 @@ def check_stocks_setting_up(df):
     yest = df.iloc[-2]
     tags = []
     
-    # SETUP 1: Multi-Timeframe Pullback
-    macd_sloping_up = today['MACD_Line'] > yest['MACD_Line']
-    recent_cross_below_60 = False
-    for i in range(1, 4):
-        curr_k = df['STOCH_K'].iloc[-i]
-        curr_d = df['STOCH_D'].iloc[-i]
-        prev_k = df['STOCH_K'].iloc[-(i+1)]
-        prev_d = df['STOCH_D'].iloc[-(i+1)]
-        if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
-            recent_cross_below_60 = True
-            break
-    if macd_sloping_up and recent_cross_below_60:
-        tags.append("✔️ Pullback")
+    weekly = resample_ohlc(df, "W")
+    monthly = resample_ohlc(df, "ME")
+
+    # SETUP 1: Multi-Timeframe Pullback (DW & WM variants)
+    # DW Logic (Daily Stoch / Weekly MACD)
+    daily_cross_below_60 = False
+    if len(df) >= 5:
+        for i in range(1, 4):
+            curr_k = df['STOCH_K'].iloc[-i]
+            curr_d = df['STOCH_D'].iloc[-i]
+            prev_k = df['STOCH_K'].iloc[-(i+1)]
+            prev_d = df['STOCH_D'].iloc[-(i+1)]
+            if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
+                daily_cross_below_60 = True
+                break
+            
+    weekly_macd_up = False
+    if not weekly.empty and len(weekly) > 3:
+        macd_w = compute_macd(weekly['Close'])
+        if not macd_w.empty and len(macd_w) > 2:
+            weekly_macd_up = macd_w['MACD'].iloc[-1] > macd_w['MACD'].iloc[-2]
+
+    if daily_cross_below_60 and weekly_macd_up:
+        tags.append("✔️ Pullback (DW)")
+
+    # WM Logic (Weekly Stoch / Monthly MACD)
+    weekly_cross_below_60 = False
+    if not weekly.empty and len(weekly) >= 20:
+        try:
+            stoch_w = ta.stoch(weekly['High'], weekly['Low'], weekly['Close'], k=14, d=3, smooth_k=3)
+            weekly['STOCH_K'] = stoch_w['STOCHk_14_3_3']
+            weekly['STOCH_D'] = stoch_w['STOCHd_14_3_3']
+            for i in range(1, 4):
+                if i < len(weekly) - 1:
+                    curr_k = weekly['STOCH_K'].iloc[-i]
+                    curr_d = weekly['STOCH_D'].iloc[-i]
+                    prev_k = weekly['STOCH_K'].iloc[-(i+1)]
+                    prev_d = weekly['STOCH_D'].iloc[-(i+1)]
+                    if pd.notna(curr_k) and pd.notna(prev_k):
+                        if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
+                            weekly_cross_below_60 = True
+                            break
+        except Exception:
+            pass
+
+    monthly_macd_up = False
+    if not monthly.empty and len(monthly) > 3:
+        macd_m = compute_macd(monthly['Close'])
+        if not macd_m.empty and len(macd_m) > 2:
+            monthly_macd_up = macd_m['MACD'].iloc[-1] > macd_m['MACD'].iloc[-2]
+
+    if weekly_cross_below_60 and monthly_macd_up:
+        tags.append("✔️ Pullback (WM)")
 
     # SETUP 2: Breakout Retest
     lookback = 40
