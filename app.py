@@ -524,8 +524,8 @@ def save_scan_history(results_df: pd.DataFrame):
             supabase.table("scan_history").insert(rows[i:i + chunk_size]).execute()
     except Exception:
         pass
-@st.cache_data(ttl=300, show_spinner=False)
 
+@st.cache_data(ttl=300, show_spinner=False)
 def _load_scan_history_cached(user_id: str, ticker: str, _supabase_url: str) -> pd.DataFrame:
     supabase = get_supabase_client()
     if not supabase or not user_id:
@@ -768,26 +768,29 @@ def render_login_screen():
         st.subheader("Account Access")
         auth_mode = st.radio(
             "Choose Mode",
-            ["Login", "Sign Up"],
+            ["Login", "Sign Up", "Reset Password"],
             key="auth_mode",
-            help="Login uses an existing account. Sign Up creates one; you may need to confirm email in Supabase before the first login.",
+            help="Login uses an existing account. Sign Up creates one. Reset Password sends a recovery email.",
         )
         email = st.text_input(
             "Email",
             key="auth_email",
             help="The address used for this account and, if you opt in, the daily top-scores email.",
         )
-        password = st.text_input(
-            "Password",
-            type="password",
-            key="auth_pass",
-            help="Supabase account password. This app never emails your password.",
-        )
-        st.checkbox(
-            "Stay signed in",
-            key="stay_signed_in",
-            help="Keep this browser signed in for about 30 days, or until you log out. Uncheck to require login again after you close the tab.",
-        )
+        
+        if auth_mode != "Reset Password":
+            password = st.text_input(
+                "Password",
+                type="password",
+                key="auth_pass",
+                help="Supabase account password. This app never emails your password.",
+            )
+            st.checkbox(
+                "Stay signed in",
+                key="stay_signed_in",
+                help="Keep this browser signed in for about 30 days, or until you log out.",
+            )
+            
         if auth_mode == "Login":
             if st.button(
                 "Log In",
@@ -808,7 +811,7 @@ def render_login_screen():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
-        else:
+        elif auth_mode == "Sign Up":
             if st.button(
                 "Create Account",
                 use_container_width=True,
@@ -824,6 +827,19 @@ def render_login_screen():
                     st.success("Account created! Check your email or log in.")
                 except Exception as e:
                     st.error(f"Sign up failed: {e}")
+        elif auth_mode == "Reset Password":
+            if st.button(
+                "Send Reset Email",
+                use_container_width=True,
+                type="primary",
+                help="Send a password recovery link to your registered email address.",
+            ):
+                try:
+                    supabase.auth.reset_password_for_email(email)
+                    st.success("Password reset email sent! Please check your inbox.")
+                except Exception as e:
+                    st.error(f"Failed to send reset email: {e}")
+                    
     with col2:
         st.markdown(
             """
@@ -835,10 +851,6 @@ def render_login_screen():
             """
         )
     return False
-
-@st.cache_resource
-def _get_freshness_tracker() -> dict:
-    return {}
 
 def _nse_session(referer: str) -> requests.Session:
     session = requests.Session()
@@ -1152,7 +1164,7 @@ def show_setup_documentation_modal():
     
     **1. Multi-Timeframe Pullback (DW & WM)**
     - **Daily/Weekly (DW):** Daily Stochastic (K) crosses above D below 60 within the last 3 days, backed by a Weekly MACD line sloping upwards.
-    - **Weekly/Monthly (WM):** Weekly Stochastic (K) crosses above D below 60 within the last 3 weeks, backed by a Monthly MACD line sloping upwards.
+    - **Weekly/Monthly (WM):** Weekly Stochastic (K) crosses above D below 60 within the last 2 weeks, backed by a Monthly MACD line sloping upwards.
     
     **2. Breakout Retest**
     Price broke its 40-day high within the last 5 days on above-average volume, and is now resting quietly within 3% of that breakout line on lower volume. Identifies low-risk entries on prior resistance turning into support.
@@ -1262,7 +1274,7 @@ def check_stocks_setting_up(df):
             stoch_w = ta.stoch(weekly['High'], weekly['Low'], weekly['Close'], k=14, d=3, smooth_k=3)
             weekly['STOCH_K'] = stoch_w['STOCHk_14_3_3']
             weekly['STOCH_D'] = stoch_w['STOCHd_14_3_3']
-            for i in range(1, 4):
+            for i in range(1, 3):
                 if i < len(weekly) - 1:
                     curr_k = weekly['STOCH_K'].iloc[-i]
                     curr_d = weekly['STOCH_D'].iloc[-i]
