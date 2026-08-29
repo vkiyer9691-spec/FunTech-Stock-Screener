@@ -180,6 +180,37 @@ BROKER_SYMBOL_HEADERS = [
 ]
 
 # ----------------------------------------------------------------------------------
+# Helper Functions
+# ----------------------------------------------------------------------------------
+
+def abbreviate_sector(sector_raw: str) -> str:
+    if not sector_raw or sector_raw == "Unknown":
+        return "Unknown"
+    return SECTOR_MAP.get(sector_raw.strip(), sector_raw.strip())
+
+def parse_broker_symbols(df: pd.DataFrame) -> list:
+    matched_col = None
+    cleaned_cols = {str(c).strip().lower(): c for c in df.columns}
+    
+    for key in BROKER_SYMBOL_HEADERS:
+        if key in cleaned_cols:
+            matched_col = cleaned_cols[key]
+            break
+            
+    if not matched_col:
+        return []
+    raw_symbols = df[matched_col].dropna().astype(str).tolist()
+    formatted_symbols = []
+    
+    for sym in raw_symbols:
+        clean = sym.strip().upper()
+        clean = clean.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
+        if clean and not clean.startswith("^"):
+            formatted_symbols.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+            
+    return list(dict.fromkeys(formatted_symbols))
+
+# ----------------------------------------------------------------------------------
 # Dynamic Universe Sources (NSE Index Constituents & F&O List)
 # ----------------------------------------------------------------------------------
 NSE_INDEX_FILES = {
@@ -803,15 +834,11 @@ def render_login_screen():
         )
     return False
 
-# ----------------------------------------------------------------------------------
-# Data Fetchers
-# ----------------------------------------------------------------------------------
-
 @st.cache_resource
 def _get_freshness_tracker() -> dict:
     return {}
-@st.cache_data(ttl=86400, show_spinner=False)
 
+@st.cache_data(ttl=86400, show_spinner=False)
 def load_index_list(index_name: str) -> list:
     filename = NSE_INDEX_FILES.get(index_name)
     if not filename:
