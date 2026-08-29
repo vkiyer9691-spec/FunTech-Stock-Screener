@@ -11,6 +11,8 @@ import time
 import re
 import csv
 import io
+import json
+import uuid
 from pathlib import Path
 import requests
 from datetime import date, timedelta
@@ -76,13 +78,18 @@ def _apply_page_chrome():
     st.set_page_config(
         page_title="NSE Stock Screener & Portfolio Evaluator",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="collapsed"
     )
     st.markdown(
         """
         <style>
         html, body, [class*="css"] {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        section[data-testid="stSidebar"],
+        div[data-testid="collapsedControl"],
+        div[data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
         }
         .stButton > button, .stSelectbox, .stTextInput, .stMultiSelect {
             min-height: 44px !important;
@@ -576,11 +583,145 @@ def remove_from_watchlist(ticker: str) -> bool:
     except Exception:
         return False
 
+AUTH_COOKIE = "funtech_sid"
+AUTH_DIR = Path(__file__).resolve().parent / "data" / "auth_sessions"
+STAY_SIGNED_IN_SECONDS = 30 * 24 * 60 * 60
+
+
+def _valid_auth_sid(sid: str) -> bool:
+    try:
+        uuid.UUID(str(sid))
+        return True
+    except Exception:
+        return False
+
+
+def _auth_cookie_secure_flag() -> str:
+    try:
+        url = str(getattr(st.context, "url", "") or "")
+        if url.startswith("https"):
+            return "; Secure"
+    except Exception:
+        pass
+    return ""
+
+
+def _flush_auth_cookie_js() -> None:
+    pending = st.session_state.pop("_auth_cookie", None)
+    if pending is None:
+        return
+    sid = str(pending.get("sid") or "")
+    max_age = int(pending.get("max_age") or 0)
+    secure = _auth_cookie_secure_flag()
+    if max_age <= 0 or not sid:
+        script = (
+            f"window.parent.document.cookie = '{AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax{secure}';"
+        )
+    else:
+        script = (
+            f"window.parent.document.cookie = '{AUTH_COOKIE}={sid}; path=/; max-age={max_age}; SameSite=Lax{secure}';"
+        )
+    st.components.v1.html(f"<script>{script}</script>", height=0)
+
+
+def _read_auth_sid() -> str:
+    try:
+        sid = str(st.context.cookies.get(AUTH_COOKIE) or "").strip()
+    except Exception:
+        return ""
+    return sid if _valid_auth_sid(sid) else ""
+
+
+def _write_stay_session(payload: dict) -> str:
+    AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    sid = str(uuid.uuid4())
+    (AUTH_DIR / f"{sid}.json").write_text(json.dumps(payload), encoding="utf-8")
+    st.session_state["_auth_cookie"] = {"sid": sid, "max_age": STAY_SIGNED_IN_SECONDS}
+    return sid
+
+
+def _clear_stay_session() -> None:
+    sid = _read_auth_sid()
+    if sid:
+        path = AUTH_DIR / f"{sid}.json"
+        try:
+            path.unlink()
+        except Exception:
+            pass
+    st.session_state["_auth_cookie"] = {"sid": "", "max_age": 0}
+
+
+def _session_tokens(session) -> tuple[str, str]:
+    if session is None:
+        return "", ""
+    if isinstance(session, dict):
+        return str(session.get("access_token") or ""), str(session.get("refresh_token") or "")
+    return str(getattr(session, "access_token", "") or ""), str(getattr(session, "refresh_token", "") or "")
+
+
+def _persist_login_if_requested(user, session) -> None:
+    if not st.session_state.get("stay_signed_in", True):
+        _clear_stay_session()
+        return
+    access, refresh = _session_tokens(session)
+    if isinstance(user, dict):
+        uid, email = user.get("id"), user.get("email")
+    else:
+        uid, email = getattr(user, "id", None), getattr(user, "email", None)
+    if access and refresh:
+        _write_stay_session({"mode": "supabase", "access_token": access, "refresh_token": refresh, "email": email, "id": uid})
+        return
+    _write_stay_session({"mode": "bypass", "email": email, "id": uid or "local-dev-id"})
+
+
+def _try_restore_stay_signed_in() -> None:
+    if st.session_state.get("user"):
+        return
+    sid = _read_auth_sid()
+    if not sid:
+        return
+    path = AUTH_DIR / f"{sid}.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if data.get("mode") == "bypass":
+        st.session_state["user"] = {
+            "id": data.get("id") or "local-dev-id",
+            "email": data.get("email") or "vkiyer@hotmail.com",
+        }
+        st.session_state["supabase_session"] = None
+        return
+    access, refresh = data.get("access_token") or "", data.get("refresh_token") or ""
+    supabase = get_supabase_client()
+    if not supabase or not access or not refresh:
+        return
+    try:
+        supabase.auth.set_session(access, refresh)
+        got = supabase.auth.get_user()
+        user = getattr(got, "user", None) or got
+        session = supabase.auth.get_session()
+        st.session_state["user"] = user
+        st.session_state["supabase_session"] = session
+        uid = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        if uid:
+            load_user_settings_from_db(uid)
+    except Exception:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
 def init_auth_session():
     if "user" not in st.session_state:
         st.session_state["user"] = None
     if "supabase_session" not in st.session_state:
         st.session_state["supabase_session"] = None
+    if "stay_signed_in" not in st.session_state:
+        st.session_state["stay_signed_in"] = True
     init_session_defaults()
 
 def render_login_screen():
@@ -593,6 +734,11 @@ def render_login_screen():
         st.warning("⚠️ **Supabase configuration not detected.**")
         st.info("Configure `SUPABASE_URL` and `SUPABASE_KEY` in `.streamlit/secrets.toml` to enable auth & persistence.")
         
+        st.checkbox(
+            "Stay signed in",
+            key="stay_signed_in",
+            help="Keep this browser signed in for about 30 days, or until you log out. Uncheck to require login again after you close the tab.",
+        )
         if st.button(
             "Bypass Login (Developer / Local Mode)",
             use_container_width=True,
@@ -600,6 +746,7 @@ def render_login_screen():
         ):
             st.session_state["user"] = {"id": "local-dev-id", "email": "vkiyer@hotmail.com"}
             st.session_state["supabase_session"] = None
+            _persist_login_if_requested(st.session_state["user"], None)
             st.rerun()
         return False
     col1, col2 = st.columns([1, 1])
@@ -622,6 +769,11 @@ def render_login_screen():
             key="auth_pass",
             help="Supabase account password. This app never emails your password.",
         )
+        st.checkbox(
+            "Stay signed in",
+            key="stay_signed_in",
+            help="Keep this browser signed in for about 30 days, or until you log out. Uncheck to require login again after you close the tab.",
+        )
         if auth_mode == "Login":
             if st.button(
                 "Log In",
@@ -637,6 +789,7 @@ def render_login_screen():
                     user_id = getattr(res.user, "id", None)
                     if user_id:
                         load_user_settings_from_db(user_id)
+                    _persist_login_if_requested(res.user, res.session)
                     st.success("Login successful!")
                     st.rerun()
                 except Exception as e:
@@ -653,6 +806,7 @@ def render_login_screen():
                     if res.user and res.session:
                         st.session_state["user"] = res.user
                         st.session_state["supabase_session"] = res.session
+                        _persist_login_if_requested(res.user, res.session)
                     st.success("Account created! Check your email or log in.")
                 except Exception as e:
                     st.error(f"Sign up failed: {e}")
@@ -1451,6 +1605,9 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
 def _run_streamlit_ui():
     """Streamlit-only entry. Kept off the import path so daily_digest.py can reuse the engine."""
     _apply_page_chrome()
+    _flush_auth_cookie_js()
+    init_auth_session()
+    _try_restore_stay_signed_in()
     if "user" not in st.session_state or st.session_state["user"] is None:
         render_login_screen()
         st.stop()
@@ -1466,25 +1623,34 @@ def _run_streamlit_ui():
             st.session_state["digest_top_n"] = int(stored.get("top_n") or 10)
         st.session_state["digest_pref_hydrated"] = True
     user_is_admin = is_admin(current_user)
-    st.sidebar.markdown(f"👤 **User:** `{user_email}`")
-    if user_is_admin:
-        st.sidebar.markdown("⭐ **Role:** `Administrator`")
-    if st.sidebar.button(
-        "🚪 Log Out",
-        use_container_width=True,
-        help="End this session. Unsaved on-screen results are cleared; cloud settings stay in Supabase.",
-    ):
-        supabase = get_supabase_client()
-        if supabase:
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
-        st.session_state.clear()
-        st.rerun()
-    st.sidebar.divider()
-    st.title("📊 NSE Stock Screener & Portfolio Evaluator")
-    st.caption("Two-pillar engine (CANSLIM fundamentals + technicals) for NSE traders and investors.")
+    head_l, head_r = st.columns([3, 2])
+    with head_l:
+        st.title("📊 NSE Stock Screener & Portfolio Evaluator")
+        st.caption("Two-pillar engine (CANSLIM fundamentals + technicals) for NSE traders and investors.")
+    with head_r:
+        st.markdown(
+            f"<div style='text-align:right;padding-top:0.6rem'>"
+            f"<strong>{user_email}</strong><br>"
+            f"<span style='color:#666;font-size:0.9rem'>"
+            f"{'Administrator' if user_is_admin else 'Signed in'}"
+            f"</span></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "Log Out",
+            use_container_width=True,
+            help="End this session. Unsaved on-screen results are cleared; cloud settings stay in Supabase.",
+        ):
+            _clear_stay_session()
+            supabase = get_supabase_client()
+            if supabase:
+                try:
+                    supabase.auth.sign_out()
+                except Exception:
+                    pass
+            _flush_auth_cookie_js()
+            st.session_state.clear()
+            st.rerun()
     target_ticker = st.session_state.get("active_inspect_ticker")
     if target_ticker:
         found_row = None
@@ -1502,12 +1668,6 @@ def _run_streamlit_ui():
         else:
             st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
 
-    # ----------------------------------------------------------------------------------
-    # Sidebar Controls & Weight Auto-Saver
-
-    # ----------------------------------------------------------------------------------
-    st.sidebar.header("⚙️ Engine Controls")
-    st.sidebar.subheader("1. Pillar Weights (sum to 10)")
     from digest import clamp_pillar_weights as _clamp_w
     _wf0 = int(st.session_state.get("w_fund", 5))
     _wt0 = int(st.session_state.get("w_tech", 5))
@@ -1525,45 +1685,6 @@ def _run_streamlit_ui():
         st.session_state["w_fund"] = 10 - int(st.session_state.get("w_tech", 5))
         save_user_settings_to_db()
         _persist_digest_pref()
-
-    w_fund = st.sidebar.slider(
-        "Fundamental Weight",
-        0,
-        10,
-        key="w_fund",
-        on_change=on_fund_weight_change,
-        help="Share of Total from the CANSLIM score. Technical is set to 10 minus this, so the two always add to 10.",
-    )
-    w_tech = st.sidebar.slider(
-        "Technical Weight",
-        0,
-        10,
-        key="w_tech",
-        on_change=on_tech_weight_change,
-        help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this. Leadership vs Nifty/sector is inside fundamentals (L / Ls).",
-    )
-    st.sidebar.caption(f"Fundamental {int(w_fund)} + Technical {int(w_tech)} = 10")
-    st.sidebar.divider()
-    st.sidebar.subheader("2. Pillar Customization")
-    if st.sidebar.button(
-        "⚙️ Fundamental Rules",
-        use_container_width=True,
-        help="Choose which CANSLIM checks count toward the fundamental score. Disabled rules are skipped for every ticker.",
-    ):
-        customize_fundamental_modal()
-    if st.sidebar.button(
-        "⚙️ Technical Rules",
-        use_container_width=True,
-        help="Choose which of the 10 technical checks count. Each enabled rule that passes adds to the technical score.",
-    ):
-        customize_technical_modal()
-
-    st.sidebar.divider()
-    st.sidebar.subheader("Top scores")
-    st.sidebar.caption(
-        "Sent once every day. Uses your pillar weights and which rules you have turned on. "
-        "Not a stock pick or recommendation."
-    )
 
     def _snapshot_engine():
         w_f = int(st.session_state.get("w_fund", 5))
@@ -1592,103 +1713,41 @@ def _run_streamlit_ui():
     def _on_digest_pref_change():
         _persist_digest_pref()
 
-    st.sidebar.checkbox(
-        "Email me top scores",
-        key="digest_opt_in",
-        on_change=_on_digest_pref_change,
-        help="This is sent once every day. Highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
-    )
-    st.sidebar.number_input(
-        "Number of stocks per group/index",
-        min_value=3,
-        max_value=25,
-        step=1,
-        key="digest_top_n",
-        on_change=_on_digest_pref_change,
-        help="How many highest-scoring tickers to list under each index or F&O group (3–25).",
-    )
-    digest_quick = st.sidebar.checkbox(
-        "Quick preview (Nifty 50 + Next 50 fallback lists)",
-        value=True,
-        key="digest_quick_preview",
-        help="Uncheck to score every live universe. That can take several minutes.",
-    )
-    if st.sidebar.button(
-        "Show top scores",
-        use_container_width=True,
-        help="Score the selected lists and open a one-time preview, including a TradingView copy of the top names across all indices.",
-    ):
-        from digest import run_digest, is_smtp_configured
-        with st.spinner("Scoring universes..."):
-            digest_result = run_digest(
-                quick=bool(digest_quick),
-                send=False,
-                extra_recipients=[],
-                top_n=int(st.session_state.get("digest_top_n") or 10),
-                skip_weekends=False,
-                settings=_snapshot_engine(),
-            )
-        st.session_state["digest_preview"] = digest_result
-        st.session_state["digest_preview_open"] = digest_result.get("status") == "ok"
-        if digest_result.get("status") == "ok":
-            st.sidebar.success("Preview opened. Copy the TradingView list there, then click Done.")
-        else:
-            st.sidebar.warning(digest_result.get("status"))
+    w_fund = int(st.session_state.get("w_fund", 5))
+    w_tech = int(st.session_state.get("w_tech", 5))
 
-    if st.session_state.get("digest_opt_in") and st.session_state.get("digest_preview"):
-        from digest import is_smtp_configured
-        if is_smtp_configured() and st.sidebar.button(
-            "Send preview to my email",
-            use_container_width=True,
-            help="Send the last preview HTML to the address on this login. Uses SMTP from secrets, not GitHub Actions.",
-        ):
-            from digest import send_email
-            html = st.session_state["digest_preview"].get("html") or ""
-            status = send_email(user_email, "FunTech top scores (preview)", html)
-            if status == "sent":
-                st.sidebar.success(f"Sent to {user_email}")
-            else:
-                st.sidebar.info(f"Not sent ({status}). HTML is in digest_outbox/.")
-
-    # ----------------------------------------------------------------------------------
-    # Dynamic Navigation Tabs
-
-    # ----------------------------------------------------------------------------------
-    # Keep the preview dialog open until Done so the TradingView slider can rerun.
     if st.session_state.get("digest_preview_open") and st.session_state.get("digest_preview"):
         show_digest_preview_modal(st.session_state["digest_preview"])
 
-    tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "ℹ️ User Guide"]
+    tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator", "🎛️ User-defined controls", "ℹ️ User Guide"]
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
     tabs = st.tabs(tab_list)
     tab_screener = tabs[0]
     tab_portfolio = tabs[1]
-    tab_guide = tabs[2]
-    tab_admin = tabs[3] if user_is_admin else None
+    tab_controls = tabs[2]
+    tab_guide = tabs[3]
+    tab_admin = tabs[4] if user_is_admin else None
 
     # ==================================================================================
     # TAB 1: STOCK SCREENER
 
     # ==================================================================================
     with tab_screener:
-        st.sidebar.divider()
-        st.sidebar.subheader("3. Screener Universe")
-        universe_source = st.sidebar.selectbox(
+        st.subheader("Screener universe")
+        universe_source = st.selectbox(
             "Universe Source",
             options=UNIVERSE_SOURCE_OPTIONS,
             index=UNIVERSE_SOURCE_OPTIONS.index("Nifty 500"),
             key="scr_universe_source",
             help="Which NSE index or F&O list to load. Live constituents are cached 24 hours; if NSE is unreachable the app uses a small built-in list.",
         )
-        with st.sidebar.status(f"Loading {universe_source}...", expanded=False) as _status:
+        with st.status(f"Loading {universe_source}...", expanded=False) as _status:
             if universe_source == "F&O Stocks":
                 base_list = load_fo_stocks()
             else:
                 base_list = load_index_list(universe_source)
             _status.update(label=f"{universe_source}: {len(base_list)} tickers loaded", state="complete")
-        # Data freshness indicator — surfaces staleness immediately instead of only
-        # showing up as "weird results" after a scan.
         _tracker = _get_freshness_tracker()
         _univ_info = _tracker.get(f"universe:{universe_source}")
         _price_ts = _tracker.get("prices")
@@ -1707,8 +1766,8 @@ def _run_streamlit_ui():
         if _last_scan:
             _age_min = (pd.Timestamp.now() - _last_scan).total_seconds() / 60
             _freshness_lines.append(f"🕒 Last scan run: {_age_min:.0f} min ago")
-        st.sidebar.caption("  \n".join(_freshness_lines))
-        with st.sidebar.expander("📤 Upload Custom CSV/Excel List", expanded=False):
+        st.caption("  \n".join(_freshness_lines))
+        with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
             uploaded_csv = st.file_uploader(
                 "Upload Universe File",
                 type=["csv", "xlsx", "xls"],
@@ -1725,67 +1784,36 @@ def _run_streamlit_ui():
                     csv_df = pd.read_csv(uploaded_csv)
                 csv_tickers = parse_broker_symbols(csv_df)
                 if csv_tickers:
-                    st.sidebar.success(f"Loaded {len(csv_tickers)} tickers from file.")
+                    st.success(f"Loaded {len(csv_tickers)} tickers from file.")
                 else:
-                    st.sidebar.error("Could not detect a symbol column in the uploaded file.")
+                    st.error("Could not detect a symbol column in the uploaded file.")
             except Exception as e:
-                st.sidebar.error(f"Error parsing universe file: {e}")
+                st.error(f"Error parsing universe file: {e}")
         full_options = list(dict.fromkeys(base_list + csv_tickers))
-        # Default to the FULL list whenever the source (or uploaded file) changes, so
-        # switching sources always starts with everything selected — no extra click needed.
-        # The widget key changes with the source/CSV state, which resets the selection
-        # to this new default; manual edits are preserved as long as source/CSV don't change.
         if csv_tickers:
             default_selection = csv_tickers
             universe_state_tag = f"csv:{len(csv_tickers)}"
         else:
             default_selection = base_list
             universe_state_tag = "idx"
-        selected_universe = st.sidebar.multiselect(
+        selected_universe = st.multiselect(
             "Active Tickers",
             options=full_options,
             default=default_selection,
             key=f"scr_active_tickers::{universe_source}::{universe_state_tag}",
             help="Tickers that will be scored. Deselect names to skip them. Switching index or uploading a file resets this list.",
         )
-        custom_raw = st.sidebar.text_input(
+        custom_raw = st.text_input(
             "Add Custom Tickers",
             value="",
             help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added if you omit it.",
         )
         custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
         watchlist_tickers = []
-        # ==========================================================================
-        # DISABLED (commented out by request, YYYY-MM-DD) — WATCHLIST SIDEBAR PANEL
-        # To re-enable: uncomment this block. Backend functions (get_watchlist,
-        # add_to_watchlist, remove_from_watchlist) are untouched and still defined.
-        # ==========================================================================
-        # if SUPABASE_AVAILABLE:
-        #     with st.sidebar.expander("⭐ My Watchlist", expanded=False):
-        #         _wl = st.session_state.get("watchlist_cache")
-        #         if _wl is None:
-        #             _wl = get_watchlist()
-        #             st.session_state["watchlist_cache"] = _wl
-        #         if not _wl:
-        #             st.caption("No starred tickers yet. Star a ticker from the results table below after running a scan.")
-        #         else:
-        #             st.caption(f"{len(_wl)} starred ticker(s):")
-        #             st.write(", ".join(_wl))
-        #             include_watchlist = st.checkbox("Include watchlist in this scan", value=False, key="scr_include_watchlist")
-        #             if include_watchlist:
-        #                 watchlist_tickers = _wl
-        #             if st.button("🗑️ Clear entire watchlist", key="scr_clear_watchlist"):
-        #                 for t in _wl:
-        #                     remove_from_watchlist(t)
-        #                 st.session_state["watchlist_cache"] = None
-        #                 st.rerun()
-        # ==========================================================================
-        # END DISABLED — WATCHLIST SIDEBAR PANEL
-        # ==========================================================================
         universe = list(dict.fromkeys(selected_universe + custom_tickers + watchlist_tickers))
         if len(universe) > 150:
-            st.sidebar.warning(f"{len(universe)} tickers selected — a full scan will take a while.")
-        force_refresh = st.sidebar.checkbox(
+            st.warning(f"{len(universe)} tickers selected — a full scan will take a while.")
+        force_refresh = st.checkbox(
             "Force fresh price data (ignore 30-min cache)",
             value=False,
             help="Normally price data is cached for 30 minutes so repeated scans are fast. "
@@ -1793,10 +1821,11 @@ def _run_streamlit_ui():
                  "market close, or if you suspect stale data. This does NOT re-fetch the "
                  "universe list (Nifty 500 etc.) — that's cached separately for 24h.",
         )
-        run_scan = st.sidebar.button(
+        run_scan = st.button(
             "🔍 Run Screener Scan",
+            type="primary",
             use_container_width=True,
-            help="Score every ticker in Active Tickers plus any custom symbols, using the weights and rules above. Large lists take several minutes.",
+            help="Score every ticker in Active Tickers plus any custom symbols, using the weights and rules on User-defined controls. Large lists take several minutes.",
         )
         if run_scan:
             if not universe:
@@ -2238,6 +2267,105 @@ def _run_streamlit_ui():
     # TAB 3: USER GUIDE
 
     # ==================================================================================
+    with tab_controls:
+        st.subheader("User-defined controls")
+        st.caption("These apply to every scan and to the top-scores email. They are saved for this account.")
+        st.markdown("**Pillar weights (sum to 10)**")
+        w_fund = st.slider(
+            "Fundamental Weight",
+            0,
+            10,
+            key="w_fund",
+            on_change=on_fund_weight_change,
+            help="Share of Total from the CANSLIM score. Technical is set to 10 minus this, so the two always add to 10.",
+        )
+        w_tech = st.slider(
+            "Technical Weight",
+            0,
+            10,
+            key="w_tech",
+            on_change=on_tech_weight_change,
+            help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this. Leadership vs Nifty/sector is inside fundamentals (L / Ls).",
+        )
+        st.caption(f"Fundamental {int(w_fund)} + Technical {int(w_tech)} = 10")
+        st.markdown("**Pillar customization**")
+        c_fund, c_tech = st.columns(2)
+        with c_fund:
+            if st.button(
+                "⚙️ Fundamental Rules",
+                use_container_width=True,
+                help="Choose which CANSLIM checks count toward the fundamental score. Disabled rules are skipped for every ticker.",
+            ):
+                customize_fundamental_modal()
+        with c_tech:
+            if st.button(
+                "⚙️ Technical Rules",
+                use_container_width=True,
+                help="Choose which of the 10 technical checks count. Each enabled rule that passes adds to the technical score.",
+            ):
+                customize_technical_modal()
+        st.divider()
+        st.markdown("**Top scores**")
+        st.caption(
+            "Sent once every day. Uses your pillar weights and which rules you have turned on. "
+            "Not a stock pick or recommendation."
+        )
+        st.checkbox(
+            "Email me top scores",
+            key="digest_opt_in",
+            on_change=_on_digest_pref_change,
+            help="This is sent once every day. Highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
+        )
+        st.number_input(
+            "Number of stocks per group/index",
+            min_value=3,
+            max_value=25,
+            step=1,
+            key="digest_top_n",
+            on_change=_on_digest_pref_change,
+            help="How many highest-scoring tickers to list under each index or F&O group (3–25).",
+        )
+        digest_quick = st.checkbox(
+            "Quick preview (Nifty 50 + Next 50 fallback lists)",
+            value=True,
+            key="digest_quick_preview",
+            help="Uncheck to score every live universe. That can take several minutes.",
+        )
+        if st.button(
+            "Show top scores",
+            use_container_width=True,
+            help="Score the selected lists and open a preview, including a TradingView copy of the top names across all indices.",
+        ):
+            from digest import run_digest
+            with st.spinner("Scoring universes..."):
+                digest_result = run_digest(
+                    quick=bool(digest_quick),
+                    send=False,
+                    extra_recipients=[],
+                    top_n=int(st.session_state.get("digest_top_n") or 10),
+                    skip_weekends=False,
+                    settings=_snapshot_engine(),
+                )
+            st.session_state["digest_preview"] = digest_result
+            st.session_state["digest_preview_open"] = digest_result.get("status") == "ok"
+            if digest_result.get("status") == "ok":
+                st.success("Preview opened. Copy the TradingView list there, then click Done.")
+            else:
+                st.warning(digest_result.get("status"))
+        if st.session_state.get("digest_opt_in") and st.session_state.get("digest_preview"):
+            from digest import is_smtp_configured, send_email
+            if is_smtp_configured() and st.button(
+                "Send preview to my email",
+                use_container_width=True,
+                help="Send the last preview HTML to the address on this login. Uses SMTP from secrets, not GitHub Actions.",
+            ):
+                html = st.session_state["digest_preview"].get("html") or ""
+                status = send_email(user_email, "FunTech top scores (preview)", html)
+                if status == "sent":
+                    st.success(f"Sent to {user_email}")
+                else:
+                    st.info(f"Not sent ({status}). HTML is in digest_outbox/.")
+
     with tab_guide:
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
         st.markdown(
@@ -2253,7 +2381,7 @@ def _run_streamlit_ui():
         st.markdown("#### **1. Stock Screener (Finding High-Growth Momentum Candidates)**")
         st.markdown(
             """
-            * **Step A (Select Universe):** Pick a live source — **Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, or F&O Stocks** — refreshed daily from NSE, or upload your own CSV/Excel file of stock symbols.
+            * **Step A (Select Universe):** On the **Stock Screener** tab, pick a live source — **Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, or F&O Stocks** — or upload your own CSV/Excel file of stock symbols.
             * **Step B (Execute Scan):** Click **Run Screener Scan**. The multi-threaded engine fetches quarterly fundamentals and technical indicators in real-time.
             * **Step C (Inspect Detailed Rules):** Click **Breakdown** next to any stock to view exactly which CANSLIM metrics or technical rules passed, failed, or were skipped.
             """
@@ -2266,13 +2394,13 @@ def _run_streamlit_ui():
             * **Step C (Export Audit):** Download the complete evaluation report as a CSV for off-line record keeping.
             """
         )
-        st.markdown("#### **3. Pillar Settings & Weightage Adjustment**")
+        st.markdown("#### **3. User-defined controls (weights, rules, top scores)**")
         st.markdown(
             """
-            * **Adjust Weights:** Slide **Fundamental Weight** or **Technical Weight**. They always add to **10** — moving one fills the remainder on the other.
-            * **Customize Rules:** Click **Fundamental Rules** or **Technical Rules** in the sidebar to toggle specific criteria on/off.
+            * **Adjust Weights:** On **User-defined controls**, slide **Fundamental Weight** or **Technical Weight**. They always add to **10** — moving one fills the remainder on the other.
+            * **Customize Rules:** On **User-defined controls**, click **Fundamental Rules** or **Technical Rules** to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
-            * **Top scores email:** Check **Email me top scores** in the sidebar. This is sent once every day with the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Show top scores** to preview now — the preview also has a TradingView copy of the unique top names across all lists. This is a score ranking, not a stock pick.
+            * **Top scores email:** On **User-defined controls**, check **Email me top scores**. This is sent once every day with the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Show top scores** to preview now — the preview also has a TradingView copy of the unique top names across all lists. This is a score ranking, not a stock pick.
             """
         )
         st.markdown("#### **4. Export to TradingView**")

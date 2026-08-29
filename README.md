@@ -41,7 +41,7 @@ Do not commit `secrets.toml`.
 
 This was **not** in the Claude-generated GitHub snapshot. It is in this working copy:
 
-1. In the sidebar, check **Email me top scores** and set **Number of stocks per group/index**.
+1. On **User-defined controls**, check **Email me top scores** and set **Number of stocks per group/index**.
 2. Rankings use **your** pillar weights and enabled rules (saved when you opt in or change settings).
 3. Click **Show top scores** (leave **Quick preview** on for a fast Nifty 50 + Next 50 sample). The preview includes a TradingView paste of unique top names across all scored indices.
 4. Each email ends with a disclaimer that this is a score ranking, not a stock pick or recommendation.
