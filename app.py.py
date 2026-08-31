@@ -192,7 +192,7 @@ def _get_freshness_tracker() -> dict:
     return {}
 
 # ----------------------------------------------------------------------------------
-# Helper Functions & Data Fetchers (Defined early to prevent NameError)
+# Helper Functions & Data Fetchers
 # ----------------------------------------------------------------------------------
 
 def abbreviate_sector(sector_raw: str) -> str:
@@ -261,11 +261,11 @@ FALLBACK_FO_STOCKS = [
     "ITC.NS", "LT.NS", "SBIN.NS", "HINDUNILVR.NS", "BAJFINANCE.NS", "MARUTI.NS",
     "M&M.NS", "SUNPHARMA.NS", "TATAMOTORS.NS", "KOTAKBANK.NS", "ULTRACEMCO.NS", "TITAN.NS",
     "AXISBANK.NS", "NTPC.NS", "ADANIENT.NS", "POWERGRID.NS", "ASIANPAINT.NS", "COALINDIA.NS",
-    "BAJAJFINSV.NS", "NESTLEIND.NS", "ONGC.NS", "TATASTEEL.NS", "HCLTECH.NS", "JSWSTEEL.NS",
-    "WIPRO.NS", "GRASIM.NS", "TECHM.NS", "INDUSINDBK.NS", "CIPLA.NS", "SBILIFE.NS",
-    "HDFCLIFE.NS", "DRREDDY.NS", "APOLLOHOSP.NS", "BRITANNIA.NS", "EICHERMOT.NS", "DIVISLAB.NS",
-    "HINDALCO.NS", "BPCL.NS", "TATACONSUM.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS",
-    "ADANIPORTS.NS", "TRENT.NS", "ONGC.NS", "DLF.NS", "PNB.NS", "BANKBARODA.NS", "CANBK.NS", "IDFCFIRSTB.NS", "FEDERALBNK.NS",
+    "BAJAJFINSV.NS", "NESTLEIND.NS", "TATASTEEL.NS", "HCLTECH.NS", "JSWSTEEL.NS", "WIPRO.NS",
+    "GRASIM.NS", "TECHM.NS", "INDUSINDBK.NS", "CIPLA.NS", "SBILIFE.NS", "HDFCLIFE.NS",
+    "DRREDDY.NS", "APOLLOHOSP.NS", "BRITANNIA.NS", "EICHERMOT.NS", "DIVISLAB.NS", "HINDALCO.NS",
+    "BPCL.NS", "TATACONSUM.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS", "ADANIPORTS.NS",
+    "TRENT.NS", "ONGC.NS", "DLF.NS", "PNB.NS", "BANKBARODA.NS", "CANBK.NS", "IDFCFIRSTB.NS", "FEDERALBNK.NS",
     "AUBANK.NS", "PFC.NS", "RECLTD.NS", "IRFC.NS", "MFSL.NS", "CHOLAFIN.NS",
     "ICICIGI.NS", "ICICIPRULI.NS", "LICHSGFIN.NS", "BANDHANBNK.NS", "PEL.NS", "MUTHOOTFIN.NS",
     "SBICARD.NS", "M&MFIN.NS", "IDBI.NS", "IEX.NS", "CDSL.NS", "BSE.NS", "ANGELONE.NS",
@@ -549,6 +549,547 @@ def fetch_info(ticker: str) -> dict:
     if not default_info.get("sector"):
         default_info["sector"] = SYMBOL_SECTOR_MAP.get(ticker, "Unknown")
     return default_info
+
+# ----------------------------------------------------------------------------------
+# Supabase Persistence Engine & Auth
+# ----------------------------------------------------------------------------------
+
+def get_supabase_client():
+    if not SUPABASE_AVAILABLE:
+        return None
+    url = _cfg("SUPABASE_URL", "supabase", "url")
+    key = _cfg("SUPABASE_KEY", "supabase", "key")
+    if url and key and url != "None" and key != "None":
+        try:
+            return create_client(url, key)
+        except Exception:
+            return None
+    return None
+
+def is_admin(user) -> bool:
+    if not user:
+        return False
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not user_id:
+        return False
+    
+    supabase = get_supabase_client()
+    if not supabase:
+        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+        return email.lower() == "vkiyer@hotmail.com"
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        res = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("role") == "admin"
+    except Exception:
+        pass
+    return False
+
+def is_authorized_or_admin(user) -> bool:
+    if not user:
+        return False
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not user_id:
+        return False
+    
+    supabase = get_supabase_client()
+    if not supabase:
+        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+        return email.lower() == "vkiyer@hotmail.com"
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        res = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            role = res.data[0].get("role")
+            return role in ["admin", "authorized"]
+    except Exception:
+        pass
+    return False
+
+def init_session_defaults():
+    if "w_fund" not in st.session_state:
+        st.session_state["w_fund"] = 5
+    if "w_tech" not in st.session_state:
+        st.session_state["w_tech"] = 5
+    for k in DEFAULT_FUND_PARAMS:
+        if f"fund_{k}" not in st.session_state:
+            st.session_state[f"fund_{k}"] = True
+    for k in DEFAULT_TECH_PARAMS:
+        if f"tech_{k}" not in st.session_state:
+            st.session_state[f"tech_{k}"] = True
+    if "digest_opt_in" not in st.session_state:
+        st.session_state["digest_opt_in"] = False
+    if "digest_top_n" not in st.session_state:
+        st.session_state["digest_top_n"] = 10
+    if "su_universes" not in st.session_state:
+        st.session_state["su_universes"] = ["Nifty 50"]
+
+def load_user_settings_from_db(user_id: str):
+    supabase = get_supabase_client()
+    if not supabase or not user_id:
+        return
+    
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        response = supabase.table("user_settings").select("*").eq("user_id", user_id).execute()
+        if response.data and len(response.data) > 0:
+            from digest import clamp_pillar_weights
+            data = response.data[0]
+            w_f, w_t = clamp_pillar_weights(data.get("w_fund", 5), data.get("w_tech", 5))
+            st.session_state["w_fund"] = w_f
+            st.session_state["w_tech"] = w_t
+            
+            fund_rules = data.get("fund_rules") or {}
+            for k in DEFAULT_FUND_PARAMS:
+                st.session_state[f"fund_{k}"] = bool(fund_rules.get(k, True))
+                
+            tech_rules = data.get("tech_rules") or {}
+            for k in DEFAULT_TECH_PARAMS:
+                st.session_state[f"tech_{k}"] = bool(tech_rules.get(k, True))
+            if "digest_opt_in" in data:
+                st.session_state["digest_opt_in"] = bool(data.get("digest_opt_in"))
+            if data.get("digest_top_n"):
+                st.session_state["digest_top_n"] = int(data.get("digest_top_n"))
+            if "setup_universes" in data and isinstance(data["setup_universes"], list):
+                st.session_state["su_universes"] = data["setup_universes"]
+    except Exception as e:
+        st.warning(f"Could not load saved settings: {e}")
+
+def save_user_settings_to_db():
+    supabase = get_supabase_client()
+    user = st.session_state.get("user")
+    session = st.session_state.get("supabase_session")
+    
+    if not supabase or not user:
+        return
+    if session and hasattr(session, "access_token"):
+        supabase.postgrest.auth(session.access_token)
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    if not user_id:
+        return
+    fund_dict = {k: st.session_state.get(f"fund_{k}", True) for k in DEFAULT_FUND_PARAMS}
+    tech_dict = {k: st.session_state.get(f"tech_{k}", True) for k in DEFAULT_TECH_PARAMS}
+    payload = {
+        "user_id": user_id,
+        "w_fund": st.session_state.get("w_fund", 5),
+        "w_tech": st.session_state.get("w_tech", 5),
+        "fund_rules": fund_dict,
+        "tech_rules": tech_dict,
+        "digest_opt_in": bool(st.session_state.get("digest_opt_in", False)),
+        "digest_top_n": int(st.session_state.get("digest_top_n", 10)),
+        "setup_universes": st.session_state.get("su_universes", ["Nifty 50"]),
+        "updated_at": "now()"
+    }
+    try:
+        supabase.table("user_settings").upsert(payload).execute()
+    except Exception:
+        # Fallback if specific newer columns do not exist yet
+        payload.pop("digest_opt_in", None)
+        payload.pop("digest_top_n", None)
+        payload.pop("setup_universes", None)
+        try:
+            supabase.table("user_settings").upsert(payload).execute()
+        except Exception as e:
+            st.error(f"Failed to save settings: {e}")
+
+def _current_user_id():
+    user = st.session_state.get("user")
+    if not user:
+        return None
+    return user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+
+def save_scan_history(results_df: pd.DataFrame):
+    supabase = get_supabase_client()
+    user_id = _current_user_id()
+    if not supabase or not user_id or results_df is None or results_df.empty:
+        return
+    session = st.session_state.get("supabase_session")
+    if session and hasattr(session, "access_token"):
+        supabase.postgrest.auth(session.access_token)
+    now_iso = pd.Timestamp.now(tz="UTC").isoformat()
+    rows = []
+    for _, r in results_df.iterrows():
+        rows.append({
+            "user_id": user_id,
+            "ticker": r["Ticker"],
+            "scan_time": now_iso,
+            "total_score": float(r["Total Score"]),
+            "fundamental_score": float(r["Fundamental Score"]),
+            "technical_score": float(r["Technical Score"]),
+            "rs_score": 0.0,
+            "sector": r.get("Sector"),
+        })
+    try:
+        chunk_size = 200
+        for i in range(0, len(rows), chunk_size):
+            supabase.table("scan_history").insert(rows[i:i + chunk_size]).execute()
+    except Exception:
+        pass
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_scan_history_cached(user_id: str, ticker: str, _supabase_url: str) -> pd.DataFrame:
+    supabase = get_supabase_client()
+    if not supabase or not user_id:
+        return pd.DataFrame()
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        res = (
+            supabase.table("scan_history")
+            .select("scan_time,total_score,fundamental_score,technical_score,rs_score")
+            .eq("user_id", user_id)
+            .eq("ticker", ticker)
+            .order("scan_time", desc=False)
+            .execute()
+        )
+        if res.data:
+            df = pd.DataFrame(res.data)
+            df["scan_time"] = pd.to_datetime(df["scan_time"])
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+def load_scan_history(user_id: str, ticker: str) -> pd.DataFrame:
+    supabase = get_supabase_client()
+    url_key = _cfg("SUPABASE_URL") if supabase else ""
+    return _load_scan_history_cached(user_id, ticker, url_key)
+
+def get_watchlist() -> list:
+    supabase = get_supabase_client()
+    user_id = _current_user_id()
+    if not supabase or not user_id:
+        return []
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        res = supabase.table("watchlist").select("ticker").eq("user_id", user_id).execute()
+        return [r["ticker"] for r in (res.data or [])]
+    except Exception:
+        return []
+
+def add_to_watchlist(ticker: str) -> bool:
+    supabase = get_supabase_client()
+    user_id = _current_user_id()
+    if not supabase or not user_id:
+        return False
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        supabase.table("watchlist").upsert({"user_id": user_id, "ticker": ticker}).execute()
+        return True
+    except Exception:
+        return False
+
+def remove_from_watchlist(ticker: str) -> bool:
+    supabase = get_supabase_client()
+    user_id = _current_user_id()
+    if not supabase or not user_id:
+        return False
+    try:
+        session = st.session_state.get("supabase_session")
+        if session and hasattr(session, "access_token"):
+            supabase.postgrest.auth(session.access_token)
+        supabase.table("watchlist").delete().eq("user_id", user_id).eq("ticker", ticker).execute()
+        return True
+    except Exception:
+        return False
+
+AUTH_COOKIE = "funtech_sid"
+AUTH_DIR = Path(__file__).resolve().parent / "data" / "auth_sessions"
+STAY_SIGNED_IN_SECONDS = 30 * 24 * 60 * 60
+
+def _valid_auth_sid(sid: str) -> bool:
+    try:
+        uuid.UUID(str(sid))
+        return True
+    except Exception:
+        return False
+
+def _auth_cookie_secure_flag() -> str:
+    try:
+        url = str(getattr(st.context, "url", "") or "")
+        if url.startswith("https"):
+            return "; Secure"
+    except Exception:
+        pass
+    return ""
+
+def _flush_auth_cookie_js() -> None:
+    pending = st.session_state.pop("_auth_cookie", None)
+    if pending is None:
+        return
+    sid = str(pending.get("sid") or "")
+    max_age = int(pending.get("max_age") or 0)
+    secure = _auth_cookie_secure_flag()
+    if max_age <= 0 or not sid:
+        script = (
+            f"window.parent.document.cookie = '{AUTH_COOKIE}=; path=/; max-age=0; SameSite=Lax{secure}';"
+        )
+    else:
+        script = (
+            f"window.parent.document.cookie = '{AUTH_COOKIE}={sid}; path=/; max-age={max_age}; SameSite=Lax{secure}';"
+        )
+    st.components.v1.html(f"<script>{script}</script>", height=0)
+
+def _read_auth_sid() -> str:
+    try:
+        sid = str(st.context.cookies.get(AUTH_COOKIE) or "").strip()
+    except Exception:
+        return ""
+    return sid if _valid_auth_sid(sid) else ""
+
+def _write_stay_session(payload: dict) -> str:
+    AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    sid = str(uuid.uuid4())
+    (AUTH_DIR / f"{sid}.json").write_text(json.dumps(payload), encoding="utf-8")
+    st.session_state["_auth_cookie"] = {"sid": sid, "max_age": STAY_SIGNED_IN_SECONDS}
+    return sid
+
+def _clear_stay_session() -> None:
+    sid = _read_auth_sid()
+    if sid:
+        path = AUTH_DIR / f"{sid}.json"
+        try:
+            path.unlink()
+        except Exception:
+            pass
+    st.session_state["_auth_cookie"] = {"sid": "", "max_age": 0}
+
+def _session_tokens(session) -> tuple[str, str]:
+    if session is None:
+        return "", ""
+    if isinstance(session, dict):
+        return str(session.get("access_token") or ""), str(session.get("refresh_token") or "")
+    return str(getattr(session, "access_token", "") or ""), str(getattr(session, "refresh_token", "") or "")
+
+def _persist_login_if_requested(user, session) -> None:
+    if not st.session_state.get("stay_signed_in", True):
+        _clear_stay_session()
+        return
+    access, refresh = _session_tokens(session)
+    if isinstance(user, dict):
+        uid, email = user.get("id"), user.get("email")
+    else:
+        uid, email = getattr(user, "id", None), getattr(user, "email", None)
+    if access and refresh:
+        _write_stay_session({"mode": "supabase", "access_token": access, "refresh_token": refresh, "email": email, "id": uid})
+        return
+    _write_stay_session({"mode": "bypass", "email": email, "id": uid or "local-dev-id"})
+
+def _try_restore_stay_signed_in() -> None:
+    if st.session_state.get("user"):
+        return
+    sid = _read_auth_sid()
+    if not sid:
+        return
+    path = AUTH_DIR / f"{sid}.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if data.get("mode") == "bypass":
+        st.session_state["user"] = {
+            "id": data.get("id") or "local-dev-id",
+            "email": data.get("email") or "vkiyer@hotmail.com",
+        }
+        st.session_state["supabase_session"] = None
+        return
+    access, refresh = data.get("access_token") or "", data.get("refresh_token") or ""
+    supabase = get_supabase_client()
+    if not supabase or not access or not refresh:
+        return
+    try:
+        supabase.auth.set_session(access, refresh)
+        got = supabase.auth.get_user()
+        user = getattr(got, "user", None) or got
+        session = supabase.auth.get_session()
+        st.session_state["user"] = user
+        st.session_state["supabase_session"] = session
+        uid = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        if uid:
+            load_user_settings_from_db(uid)
+    except Exception:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+def init_auth_session():
+    if "user" not in st.session_state:
+        st.session_state["user"] = None
+    if "supabase_session" not in st.session_state:
+        st.session_state["supabase_session"] = None
+    if "stay_signed_in" not in st.session_state:
+        st.session_state["stay_signed_in"] = True
+    init_session_defaults()
+
+def render_login_screen():
+    init_auth_session()
+    supabase = get_supabase_client()
+    st.title("🔐 NSE Stock Screener")
+    st.caption("Please log in to access the Quantitative Analysis Engine.")
+    st.divider()
+    if not SUPABASE_AVAILABLE or supabase is None:
+        st.warning("⚠️ **Supabase configuration not detected.**")
+        st.info("Configure `SUPABASE_URL` and `SUPABASE_KEY` in `.streamlit/secrets.toml` to enable auth & persistence.")
+        
+        st.checkbox(
+            "Stay signed in",
+            key="stay_signed_in",
+            help="Keep this browser signed in for about 30 days, or until you log out. Uncheck to require login again after you close the tab.",
+        )
+        if st.button(
+            "Bypass Login (Developer / Local Mode)",
+            use_container_width=True,
+            help="Open the screener without Supabase. Settings stay on this device only and are not saved to the cloud.",
+        ):
+            st.session_state["user"] = {"id": "local-dev-id", "email": "vkiyer@hotmail.com"}
+            st.session_state["supabase_session"] = None
+            _persist_login_if_requested(st.session_state["user"], None)
+            st.rerun()
+        return False
+        
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.subheader("Account Access")
+        auth_mode = st.radio(
+            "Choose Mode",
+            ["Login", "Sign Up", "Reset Password"],
+            key="auth_mode",
+            help="Login uses an existing account. Sign Up creates one. Reset Password sends a recovery email.",
+        )
+        email = st.text_input(
+            "Email",
+            key="auth_email",
+            help="The address used for this account and, if you opt in, the daily top-scores email.",
+        )
+        
+        if auth_mode != "Reset Password":
+            password = st.text_input(
+                "Password",
+                type="password",
+                key="auth_pass",
+                help="Supabase account password. This app never emails your password.",
+            )
+            st.checkbox(
+                "Stay signed in",
+                key="stay_signed_in",
+                help="Keep this browser signed in for about 30 days, or until you log out.",
+            )
+            
+        if auth_mode == "Login":
+            if st.button(
+                "Log In",
+                use_container_width=True,
+                type="primary",
+                help="Sign in and load your saved weights, rules, and top-scores email preference.",
+            ):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    st.session_state["user"] = res.user
+                    st.session_state["supabase_session"] = res.session
+                    
+                    user_id = getattr(res.user, "id", None)
+                    if user_id:
+                        load_user_settings_from_db(user_id)
+                    _persist_login_if_requested(res.user, res.session)
+                    st.success("Login successful!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
+                    
+        elif auth_mode == "Sign Up":
+            if st.button(
+                "Create Account",
+                use_container_width=True,
+                type="primary",
+                help="Register this email. If confirmation is enabled in Supabase, check your inbox before logging in.",
+            ):
+                try:
+                    res = supabase.auth.sign_up({"email": email, "password": password})
+                    if res.user and res.session:
+                        st.session_state["user"] = res.user
+                        st.session_state["supabase_session"] = res.session
+                        _persist_login_if_requested(res.user, res.session)
+                    st.success("Account created! Check your email or log in.")
+                except Exception as e:
+                    st.error(f"Sign up failed: {e}")
+                    
+        elif auth_mode == "Reset Password":
+            if "reset_email_sent" not in st.session_state:
+                st.session_state["reset_email_sent"] = False
+
+            if not st.session_state["reset_email_sent"]:
+                if st.button(
+                    "Send Reset Code",
+                    use_container_width=True,
+                    type="primary",
+                    help="Send a 6-digit password recovery code to your registered email address.",
+                ):
+                    if not email:
+                        st.warning("Please enter your email address first.")
+                    else:
+                        try:
+                            supabase.auth.reset_password_for_email(email)
+                            st.session_state["reset_email_sent"] = True
+                            st.session_state["reset_email"] = email
+                            st.success("Reset code sent! Please check your inbox.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to send reset email: {e}")
+            else:
+                st.info(f"Enter the 6-digit code sent to **{st.session_state.get('reset_email')}**")
+                otp_code = st.text_input("6-Digit Reset Code", key="reset_otp")
+                new_password = st.text_input("New Password", type="password", key="reset_new_pass")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Update Password", use_container_width=True, type="primary"):
+                        if not otp_code or not new_password:
+                            st.warning("Please enter both the 6-digit code and your new password.")
+                        else:
+                            try:
+                                supabase.auth.verify_otp({
+                                    "email": st.session_state["reset_email"], 
+                                    "token": otp_code, 
+                                    "type": "recovery"
+                                })
+                                supabase.auth.update_user({"password": new_password})
+                                
+                                st.success("Password updated successfully! You can now log in.")
+                                st.session_state["reset_email_sent"] = False
+                                supabase.auth.sign_out()
+                            except Exception as e:
+                                st.error(f"Error resetting password: {e}")
+                with col_btn2:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state["reset_email_sent"] = False
+                        st.rerun()
+
+    with col2:
+        st.markdown(
+            """
+            ### 🏛️ What's Inside:
+            * **CANSLIM fundamental engine:** earnings, sales, highs, demand, leadership vs Nifty/sector, institutions, market.
+            * **10-point technical system:** multi-timeframe trend and momentum.
+            * **Multi-broker portfolio evaluator:** auto-parse holdings.
+            * **1-click TradingView exporter:** instant watchlist strings.
+            """
+        )
+    return False
 
 # ----------------------------------------------------------------------------------
 # Dialog Modals
@@ -1470,7 +2011,7 @@ def _run_streamlit_ui():
                     )
 
     # ==================================================================================
-    # TAB 2: PORTFOLIO EVALUATOR
+    # TAB 2: PORTFOLIO Evaluator
     # ==================================================================================
     with tab_portfolio:
         st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
@@ -1633,63 +2174,74 @@ def _run_streamlit_ui():
             
             st.markdown("Specify the universes, custom CSVs, or tickers you want to scan. We will rank them using your active Fundamental/Technical weights, take the **Top N**, and hunt for technical setups.")
             
-            col_u1, col_u2 = st.columns([2, 1])
-            with col_u1:
-                selected_universes_su = st.multiselect(
-                    "Select Universes",
-                    options=UNIVERSE_SOURCE_OPTIONS,
-                    default=["Nifty 50"],
-                    key="su_univ_multi",
-                    help="You can select multiple index lists or F&O stocks at once."
-                )
-            with col_u2:
-                top_n_su = st.number_input(
-                    "Top N Stocks to Scan for Setups", 
-                    min_value=1, max_value=1000, value=50, 
-                    help="We will rank the combined list and only look for setups in the top N."
-                )
-            
-            with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
-                uploaded_csv_su = st.file_uploader(
-                    "Upload Universe File",
-                    type=["csv", "xlsx", "xls"],
-                    key="su_csv",
-                    label_visibility="collapsed",
-                )
-            
-            csv_tickers_su = []
-            if uploaded_csv_su is not None:
-                try:
-                    if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
-                        csv_df_su = pd.read_excel(uploaded_csv_su)
-                    else:
-                        csv_df_su = pd.read_csv(uploaded_csv_su)
-                    csv_tickers_su = parse_broker_symbols(csv_df_su)
-                    if csv_tickers_su:
-                        st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
-                    else:
-                        st.error("Could not detect a symbol column in the uploaded file.")
-                except Exception as e:
-                    st.error(f"Error parsing universe file: {e}")
-            
-            custom_raw_su = st.text_input(
-                "Add Custom Tickers",
-                value="",
-                key="su_custom",
-                help="Extra NSE symbols, comma-separated."
-            )
-            custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
-            
-            force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False, key="su_force")
-
-            if st.button("Run Scan", type="primary", key="btn_run_setups"):
+            with st.form("su_form"):
+                col_u1, col_u2 = st.columns([2, 1])
+                with col_u1:
+                    su_default = st.session_state.get("su_universes", ["Nifty 50"])
+                    su_default = [x for x in su_default if x in UNIVERSE_SOURCE_OPTIONS]
+                    if not su_default: 
+                        su_default = ["Nifty 50"]
+                        
+                    selected_universes_su = st.multiselect(
+                        "Select Universes",
+                        options=UNIVERSE_SOURCE_OPTIONS,
+                        default=su_default,
+                        help="You can select multiple index lists or F&O stocks at once. These save to your profile automatically."
+                    )
+                with col_u2:
+                    top_n_su = st.number_input(
+                        "Top N Stocks to Scan for Setups", 
+                        min_value=1, max_value=1000, value=50, 
+                        help="We will rank the combined list and only look for setups in the top N."
+                    )
                 
+                with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
+                    uploaded_csv_su = st.file_uploader(
+                        "Upload Universe File",
+                        type=["csv", "xlsx", "xls"],
+                        key="su_csv",
+                        label_visibility="collapsed",
+                    )
+                
+                custom_raw_su = st.text_input(
+                    "Add Custom Tickers",
+                    value="",
+                    key="su_custom",
+                    help="A comma separated symbol list is expected (e.g. TRENT, HAL, TATAMOTORS). Spaces are fine, and .NS is added automatically."
+                )
+                
+                force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False)
+
+                btn_run_setups = st.form_submit_button("Run Scan", type="primary", use_container_width=True)
+
+            if btn_run_setups:
+                
+                st.session_state["su_universes"] = selected_universes_su
+                save_user_settings_to_db()
+
+                csv_tickers_su = []
+                if uploaded_csv_su is not None:
+                    try:
+                        if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
+                            csv_df_su = pd.read_excel(uploaded_csv_su)
+                        else:
+                            csv_df_su = pd.read_csv(uploaded_csv_su)
+                        csv_tickers_su = parse_broker_symbols(csv_df_su)
+                        if csv_tickers_su:
+                            st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
+                        else:
+                            st.error("Could not detect a symbol column in the uploaded file.")
+                    except Exception as e:
+                        st.error(f"Error parsing universe file: {e}")
+
                 all_tickers_su = []
                 for univ in selected_universes_su:
                     if univ == "F&O Stocks":
                         all_tickers_su.extend(load_fo_stocks())
                     else:
                         all_tickers_su.extend(load_index_list(univ))
+                
+                custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
                 
                 all_tickers_su.extend(csv_tickers_su)
                 all_tickers_su.extend(custom_tickers_su)
