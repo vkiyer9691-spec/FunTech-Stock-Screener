@@ -1209,15 +1209,20 @@ def show_setup_documentation_modal():
     
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
-
-    **6. Bottom Fisher (Macro Reversal)**
-    Identifies stocks bouncing from a true macro bottom.
-    - **Drop Rule:** `L0` (the bottom) must be $\ge$ 15% below the recent 150-day peak.
-    - **Thrust Rule:** Initial bounce `H1` must be $\ge$ 5% above `L0`, with Daily RSI surging $\ge$ 60.
-    - **Pullback Rule:** The dip to `L1` must retrace $\ge$ 25% of the initial thrust.
-    - **Confirmation:** Either a Higher Low (with RSI > 40) or a Lower Low with *Weekly* RSI Bullish Divergence.
-    - **Trigger:** Breaking out cleanly above `H1` today, or successfully retesting the breakout line within 1%.
     """)
+    
+    # --- TEMPORARILY COMMENTED OUT FOR REFINEMENT ---
+    # st.markdown("""
+    # **6. Bottom Fisher (Macro Reversal)**
+    # *(Temporarily disabled for algorithm refinement)*
+    # Identifies stocks bouncing from a true macro bottom.
+    # - **Drop Rule:** `L0` (the bottom) must be >= 15% below the recent 150-day peak.
+    # - **Thrust Rule:** Initial bounce `H1` must be >= 5% above `L0`, with Daily RSI surging >= 60.
+    # - **Pullback Rule:** The dip to `L1` must retrace >= 25% of the initial thrust.
+    # - **Confirmation:** Either a Higher Low (with RSI > 40) or a Lower Low with *Weekly* RSI Bullish Divergence.
+    # - **Trigger:** Breaking out cleanly above `H1` today, or successfully retesting the breakout line within 1%.
+    # """)
+
     if st.button("Close", use_container_width=True):
         st.rerun()
 
@@ -1370,67 +1375,68 @@ def check_stocks_setting_up(df):
     if strong_trend and touched_ema and closed_strong:
         tags.append("✔️ 20-EMA Bounce")
 
-    # SETUP 6: Bottom Fisher (Strict Geometric Reversal)
-    try:
-        macro_window = df.iloc[-120:-10]
-        idx_L0 = macro_window['Low'].idxmin()
-        price_L0 = df.loc[idx_L0, 'Low']
-        
-        max_high_recent = df['High'].tail(150).max()
-        
-        # Geometry 1: Ensure it's a true drawdown (>= 15% drop from peak)
-        if price_L0 <= max_high_recent * 0.85:
-            if idx_L0 < df.index[-3]:
-                thrust_window = df.loc[idx_L0:df.index[-3]]
-                idx_H1 = thrust_window['High'].idxmax()
-                price_H1 = df.loc[idx_H1, 'High']
-                
-                # Geometry 2: Thrust must be at least 5% from the bottom
-                if price_H1 >= price_L0 * 1.05:
-                    max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
-                    
-                    if max_rsi_thrust >= 60:
-                        pullback_window = df.loc[idx_H1:]
-                        idx_L1 = pullback_window['Low'].idxmin()
-                        price_L1 = df.loc[idx_L1, 'Low']
-                        
-                        thrust_range = price_H1 - price_L0
-                        
-                        # Geometry 3: Pullback must retrace at least 25% of the thrust
-                        if price_L1 <= price_H1 - (thrust_range * 0.25):
-                            valid_pullback = False
-                            
-                            # Path A (Higher Low)
-                            if price_L1 > price_L0:
-                                rsi_L1 = df.loc[idx_L1, 'RSI']
-                                if 40 <= rsi_L1 <= 55:
-                                    valid_pullback = True
-                            # Path B (Lower Low -> Bullish Divergence on Weekly)
-                            else:
-                                if not weekly.empty and 'RSI_W' in weekly.columns:
-                                    week_L0_list = weekly.index[weekly.index >= idx_L0]
-                                    week_L1_list = weekly.index[weekly.index >= idx_L1]
-                                    if len(week_L0_list) > 0 and len(week_L1_list) > 0:
-                                        week_L0 = week_L0_list[0]
-                                        week_L1 = week_L1_list[0]
-                                        rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
-                                        rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
-                                        if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
-                                            valid_pullback = True
-
-                            if valid_pullback and idx_L1 < today.name:
-                                closes_since_L1 = df.loc[idx_L1:, 'Close']
-                                has_broken_out = closes_since_L1.max() > price_H1
-                                
-                                is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
-                                
-                                # Geometry 4: Strict Retest (Close cannot be deeper than 1% below H1 pivot)
-                                is_retesting = has_broken_out and (today['Close'] >= price_H1 * 0.99) and (today['Low'] <= price_H1 * 1.02)
-                                
-                                if is_breakout_today or is_retesting:
-                                    tags.append("✔️ Bottom Fisher")
-    except Exception:
-        pass
+    # --- TEMPORARILY COMMENTED OUT FOR REFINEMENT ---
+    # # SETUP 6: Bottom Fisher (Strict Geometric Reversal)
+    # try:
+    #     macro_window = df.iloc[-120:-10]
+    #     idx_L0 = macro_window['Low'].idxmin()
+    #     price_L0 = df.loc[idx_L0, 'Low']
+    #     
+    #     max_high_recent = df['High'].tail(150).max()
+    #     
+    #     # Geometry 1: Ensure it's a true drawdown (>= 15% drop from peak)
+    #     if price_L0 <= max_high_recent * 0.85:
+    #         if idx_L0 < df.index[-3]:
+    #             thrust_window = df.loc[idx_L0:df.index[-3]]
+    #             idx_H1 = thrust_window['High'].idxmax()
+    #             price_H1 = df.loc[idx_H1, 'High']
+    #             
+    #             # Geometry 2: Thrust must be at least 5% from the bottom
+    #             if price_H1 >= price_L0 * 1.05:
+    #                 max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
+    #                 
+    #                 if max_rsi_thrust >= 60:
+    #                     pullback_window = df.loc[idx_H1:]
+    #                     idx_L1 = pullback_window['Low'].idxmin()
+    #                     price_L1 = df.loc[idx_L1, 'Low']
+    #                     
+    #                     thrust_range = price_H1 - price_L0
+    #                     
+    #                     # Geometry 3: Pullback must retrace at least 25% of the thrust
+    #                     if price_L1 <= price_H1 - (thrust_range * 0.25):
+    #                         valid_pullback = False
+    #                         
+    #                         # Path A (Higher Low)
+    #                         if price_L1 > price_L0:
+    #                             rsi_L1 = df.loc[idx_L1, 'RSI']
+    #                             if 40 <= rsi_L1 <= 55:
+    #                                 valid_pullback = True
+    #                         # Path B (Lower Low -> Bullish Divergence on Weekly)
+    #                         else:
+    #                             if not weekly.empty and 'RSI_W' in weekly.columns:
+    #                                 week_L0_list = weekly.index[weekly.index >= idx_L0]
+    #                                 week_L1_list = weekly.index[weekly.index >= idx_L1]
+    #                                 if len(week_L0_list) > 0 and len(week_L1_list) > 0:
+    #                                     week_L0 = week_L0_list[0]
+    #                                     week_L1 = week_L1_list[0]
+    #                                     rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
+    #                                     rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
+    #                                     if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
+    #                                         valid_pullback = True
+    #
+    #                         if valid_pullback and idx_L1 < today.name:
+    #                             closes_since_L1 = df.loc[idx_L1:, 'Close']
+    #                             has_broken_out = closes_since_L1.max() > price_H1
+    #                             
+    #                             is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
+    #                             
+    #                             # Geometry 4: Strict Retest (Close cannot be deeper than 1% below H1 pivot)
+    #                             is_retesting = has_broken_out and (today['Close'] >= price_H1 * 0.99) and (today['Low'] <= price_H1 * 1.02)
+    #                             
+    #                             if is_breakout_today or is_retesting:
+    #                                 tags.append("✔️ Bottom Fisher")
+    # except Exception:
+    #     pass
 
     return tags
 
@@ -1728,13 +1734,29 @@ def _run_streamlit_ui():
     _flush_auth_cookie_js()
     init_auth_session()
     _try_restore_stay_signed_in()
+    
     if "user" not in st.session_state or st.session_state["user"] is None:
         render_login_screen()
         st.stop()
+        
     init_session_defaults()
+    
+    # Ensure weights are ints and sum to 10 safely
+    _wf0 = int(st.session_state.get("w_fund", 5))
+    _wt0 = int(st.session_state.get("w_tech", 5))
+    if _wf0 + _wt0 != 10:
+        try:
+            from digest import clamp_pillar_weights as _clamp_w
+            _wf0, _wt0 = _clamp_w(_wf0, _wt0)
+        except Exception:
+            _wf0, _wt0 = 5, 5
+        st.session_state["w_fund"] = _wf0
+        st.session_state["w_tech"] = _wt0
+        
     current_user = st.session_state["user"]
     user_email = current_user.get("email") if isinstance(current_user, dict) else getattr(current_user, "email", "User")
     _uid = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
+    
     if _uid and "digest_pref_hydrated" not in st.session_state:
         from digest import load_pref_for_user
         stored = load_pref_for_user(str(_uid))
@@ -1785,24 +1807,6 @@ def _run_streamlit_ui():
             show_pillar_details_modal(found_row)
         else:
             st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
-
-    from digest import clamp_pillar_weights as _clamp_w
-    _wf0 = int(st.session_state.get("w_fund", 5))
-    _wt0 = int(st.session_state.get("w_tech", 5))
-    if _wf0 + _wt0 != 10:
-        _wf0, _wt0 = _clamp_w(_wf0, _wt0)
-        st.session_state["w_fund"] = _wf0
-        st.session_state["w_tech"] = _wt0
-
-    def on_fund_weight_change():
-        st.session_state["w_tech"] = 10 - int(st.session_state.get("w_fund", 5))
-        save_user_settings_to_db()
-        _persist_digest_pref()
-
-    def on_tech_weight_change():
-        st.session_state["w_fund"] = 10 - int(st.session_state.get("w_tech", 5))
-        save_user_settings_to_db()
-        _persist_digest_pref()
 
     def _snapshot_engine():
         w_f = int(st.session_state.get("w_fund", 5))
@@ -2372,24 +2376,46 @@ def _run_streamlit_ui():
     elif selected_tab == "🎛️ User-defined controls":
         st.subheader("User-defined controls")
         st.caption("These apply to every scan and to the top-scores email. They are saved for this account.")
+        
         st.markdown("**Pillar weights (sum to 10)**")
-        w_fund = st.slider(
+        
+        current_w_fund = int(st.session_state.get("w_fund", 5))
+        current_w_tech = int(st.session_state.get("w_tech", 5))
+        
+        new_w_fund = st.slider(
             "Fundamental Weight",
             0,
             10,
-            key="w_fund",
-            on_change=on_fund_weight_change,
+            value=current_w_fund,
+            key="slider_w_fund",
             help="Share of Total from the CANSLIM score. Technical is set to 10 minus this, so the two always add to 10.",
         )
-        w_tech = st.slider(
+        
+        if new_w_fund != current_w_fund:
+            st.session_state["w_fund"] = new_w_fund
+            st.session_state["w_tech"] = 10 - new_w_fund
+            save_user_settings_to_db()
+            _persist_digest_pref()
+            st.rerun()
+
+        new_w_tech = st.slider(
             "Technical Weight",
             0,
             10,
-            key="w_tech",
-            on_change=on_tech_weight_change,
+            value=current_w_tech,
+            key="slider_w_tech",
             help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this. Leadership vs Nifty/sector is inside fundamentals (L / Ls).",
         )
-        st.caption(f"Fundamental {int(w_fund)} + Technical {int(w_tech)} = 10")
+        
+        if new_w_tech != current_w_tech and new_w_fund == current_w_fund:
+            st.session_state["w_tech"] = new_w_tech
+            st.session_state["w_fund"] = 10 - new_w_tech
+            save_user_settings_to_db()
+            _persist_digest_pref()
+            st.rerun()
+            
+        st.caption(f"Fundamental {int(st.session_state.get('w_fund', 5))} + Technical {int(st.session_state.get('w_tech', 5))} = 10")
+        
         st.markdown("**Pillar customization**")
         c_fund, c_tech = st.columns(2)
         with c_fund:
