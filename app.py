@@ -191,10 +191,6 @@ BROKER_SYMBOL_HEADERS = [
 def _get_freshness_tracker() -> dict:
     return {}
 
-# ----------------------------------------------------------------------------------
-# Helper Functions & Data Fetchers
-# ----------------------------------------------------------------------------------
-
 def abbreviate_sector(sector_raw: str) -> str:
     if not sector_raw or sector_raw == "Unknown":
         return "Unknown"
@@ -1192,7 +1188,7 @@ def show_pillar_details_modal(row_data):
 @st.dialog("📚 Setup Logic Documentation")
 def show_setup_documentation_modal():
     st.markdown("""
-    ### 5-Setup Engine Rules Breakdown
+    ### Setup Engine Rules Breakdown
     
     **1. Multi-Timeframe Pullback (DW & WM)**
     - **Daily/Weekly (DW):** Daily Stochastic (K) crosses above D below 60 within the last 3 days, backed by a Weekly MACD line sloping upwards.
@@ -1209,6 +1205,12 @@ def show_setup_documentation_modal():
     
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
+
+    **6. Bottom Fisher (Macro Reversal)**
+    Identifies stocks bouncing from a 3-month macro bottom (`L0`). Requires an initial thrust (`H1`) where Daily RSI surges > 60, followed by a pullback (`L1`).
+    - **Path A (Higher Low):** `L1` > `L0` and Daily RSI holds 40-55 support.
+    - **Path B (Shakeout/Divergence):** `L1` <= `L0`, but *Weekly* RSI forms a Bullish Divergence.
+    - **Trigger:** Today's price is breaking above the `H1` pivot, or successfully retesting it after a recent breakout.
     """)
     if st.button("Close", use_container_width=True):
         st.rerun()
@@ -1254,7 +1256,7 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
     return pd.DataFrame({"MACD": macd_line, "MACDh": hist, "MACDs": signal_line})
 
 def check_stocks_setting_up(df):
-    if df is None or len(df) < 60:
+    if df is None or len(df) < 100:
         return []
         
     try:
@@ -1276,6 +1278,9 @@ def check_stocks_setting_up(df):
     
     weekly = resample_ohlc(df, "W")
     monthly = resample_ohlc(df, "ME")
+    
+    if not weekly.empty:
+        weekly['RSI_W'] = compute_rsi(weekly['Close'], 14)
 
     # SETUP 1: Multi-Timeframe Pullback (DW & WM variants)
     daily_cross_below_60 = False
@@ -1358,6 +1363,57 @@ def check_stocks_setting_up(df):
     closed_strong = today['Close'] > (today['Low'] + (daily_range * 0.5))
     if strong_trend and touched_ema and closed_strong:
         tags.append("✔️ 20-EMA Bounce")
+
+    # SETUP 6: Bottom Fisher
+    try:
+        search_window = df.iloc[-70:-10]
+        idx_L0 = search_window['Low'].idxmin()
+        price_L0 = df.loc[idx_L0, 'Low']
+
+        if idx_L0 < df.index[-3]:
+            thrust_window = df.loc[idx_L0:df.index[-3]]
+            idx_H1 = thrust_window['High'].idxmax()
+            price_H1 = df.loc[idx_H1, 'High']
+
+            max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
+
+            if idx_H1 > idx_L0 and max_rsi_thrust >= 60:
+                pullback_window = df.loc[idx_H1:]
+                idx_L1 = pullback_window['Low'].idxmin()
+                price_L1 = df.loc[idx_L1, 'Low']
+
+                if idx_L1 > idx_H1:
+                    valid_pullback = False
+                    if price_L1 > price_L0:
+                        rsi_L1 = df.loc[idx_L1, 'RSI']
+                        if 40 <= rsi_L1 <= 55:
+                            valid_pullback = True
+                    else:
+                        if not weekly.empty:
+                            week_L0_list = weekly.index[weekly.index >= idx_L0]
+                            week_L1_list = weekly.index[weekly.index >= idx_L1]
+                            
+                            if len(week_L0_list) > 0 and len(week_L1_list) > 0:
+                                week_L0 = week_L0_list[0]
+                                week_L1 = week_L1_list[0]
+                                
+                                rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
+                                rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
+                                
+                                if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
+                                    valid_pullback = True
+
+                    if valid_pullback:
+                        closes_since_L1 = df.loc[idx_L1:, 'Close']
+                        has_broken_out = closes_since_L1.max() > price_H1
+                        
+                        is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
+                        is_retesting = has_broken_out and (today['Low'] <= price_H1 * 1.02) and (today['Close'] >= price_H1 * 0.98)
+                        
+                        if is_breakout_today or is_retesting:
+                            tags.append("✔️ Bottom Fisher")
+    except Exception:
+        pass
 
     return tags
 
