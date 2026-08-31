@@ -1767,28 +1767,22 @@ def _run_streamlit_ui():
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
         
-    tabs = st.tabs(tab_list)
-    
-    tab_screener = tabs[0]
-    tab_portfolio = tabs[1]
-    
-    current_tab_idx = 2
-    if user_is_authorized_or_admin:
-        tab_setting_up = tabs[current_tab_idx]
-        current_tab_idx += 1
-    else:
-        tab_setting_up = None
-        
-    tab_controls = tabs[current_tab_idx]
-    current_tab_idx += 1
-    tab_guide = tabs[current_tab_idx]
-    current_tab_idx += 1
-    tab_admin = tabs[current_tab_idx] if user_is_admin else None
+    if "active_main_tab" not in st.session_state:
+        st.session_state["active_main_tab"] = "🔍 Stock Screener"
+
+    selected_tab = st.radio(
+        "Navigation", 
+        tab_list, 
+        horizontal=True, 
+        label_visibility="collapsed", 
+        key="active_main_tab"
+    )
+    st.divider()
 
     # ==================================================================================
     # TAB 1: STOCK SCREENER
     # ==================================================================================
-    with tab_screener:
+    if selected_tab == "🔍 Stock Screener":
         st.subheader("Screener universe")
         universe_source = st.selectbox(
             "Universe Source",
@@ -2013,7 +2007,7 @@ def _run_streamlit_ui():
     # ==================================================================================
     # TAB 2: PORTFOLIO Evaluator
     # ==================================================================================
-    with tab_portfolio:
+    elif selected_tab == "💼 Portfolio Evaluator":
         st.subheader("💼 Multi-Broker Portfolio Health Evaluator")
         st.caption("Supports raw holdings exports from Zerodha, Groww, Dhan, Upstox, Angel One, ICICI Direct, and Kotak.")
     
@@ -2160,150 +2154,149 @@ def _run_streamlit_ui():
     # ==================================================================================
     # TAB 3: STOCKS SETTING UP (Authorized/Admin Only)
     # ==================================================================================
-    if tab_setting_up is not None:
-        with tab_setting_up:
-            st.subheader("📈 Stocks Setting Up")
-            
-            col_doc, col_empty = st.columns([1, 4])
-            with col_doc:
-                if st.button("📚 Setup Logic Documentation", use_container_width=True):
-                    show_setup_documentation_modal()
-            
-            st.caption("⚠️ **Disclaimer:** These are setups based exclusively on technical indicators. The user must do proper due diligence and risk assessment before committing money in the market.")
-            st.divider()
-            
-            st.markdown("Specify the universes, custom CSVs, or tickers you want to scan. We will rank them using your active Fundamental/Technical weights, take the **Top N**, and hunt for technical setups.")
-            
-            with st.form("su_form"):
-                col_u1, col_u2 = st.columns([2, 1])
-                with col_u1:
-                    su_default = st.session_state.get("su_universes", ["Nifty 50"])
-                    su_default = [x for x in su_default if x in UNIVERSE_SOURCE_OPTIONS]
-                    if not su_default: 
-                        su_default = ["Nifty 50"]
-                        
-                    selected_universes_su = st.multiselect(
-                        "Select Universes",
-                        options=UNIVERSE_SOURCE_OPTIONS,
-                        default=su_default,
-                        help="You can select multiple index lists or F&O stocks at once. These save to your profile automatically."
-                    )
-                with col_u2:
-                    top_n_su = st.number_input(
-                        "Top N Stocks to Scan for Setups", 
-                        min_value=1, max_value=1000, value=50, 
-                        help="We will rank the combined list and only look for setups in the top N."
-                    )
-                
-                with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
-                    uploaded_csv_su = st.file_uploader(
-                        "Upload Universe File",
-                        type=["csv", "xlsx", "xls"],
-                        key="su_csv",
-                        label_visibility="collapsed",
-                    )
-                
-                custom_raw_su = st.text_input(
-                    "Add Custom Tickers",
-                    value="",
-                    key="su_custom",
-                    help="A comma separated symbol list is expected (e.g. TRENT, HAL, TATAMOTORS). Spaces are fine, and .NS is added automatically."
-                )
-                
-                force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False)
-
-                btn_run_setups = st.form_submit_button("Run Scan", type="primary", use_container_width=True)
-
-            if btn_run_setups:
-                
-                st.session_state["su_universes"] = selected_universes_su
-                save_user_settings_to_db()
-
-                csv_tickers_su = []
-                if uploaded_csv_su is not None:
-                    try:
-                        if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
-                            csv_df_su = pd.read_excel(uploaded_csv_su)
-                        else:
-                            csv_df_su = pd.read_csv(uploaded_csv_su)
-                        csv_tickers_su = parse_broker_symbols(csv_df_su)
-                        if csv_tickers_su:
-                            st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
-                        else:
-                            st.error("Could not detect a symbol column in the uploaded file.")
-                    except Exception as e:
-                        st.error(f"Error parsing universe file: {e}")
-
-                all_tickers_su = []
-                for univ in selected_universes_su:
-                    if univ == "F&O Stocks":
-                        all_tickers_su.extend(load_fo_stocks())
-                    else:
-                        all_tickers_su.extend(load_index_list(univ))
-                
-                custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
-                
-                all_tickers_su.extend(csv_tickers_su)
-                all_tickers_su.extend(custom_tickers_su)
-                all_tickers_su = list(set(all_tickers_su))
-                
-                if not all_tickers_su:
-                    st.warning("No tickers found. Please select a universe, upload a CSV, or add custom tickers.")
-                else:
-                    if force_refresh_su:
-                        fetch_daily.clear()
-                        fetch_info.clear()
-                        
-                    with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
-                        ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
+    elif selected_tab == "📈 Stocks Setting Up":
+        st.subheader("📈 Stocks Setting Up")
+        
+        col_doc, col_empty = st.columns([1, 4])
+        with col_doc:
+            if st.button("📚 Setup Logic Documentation", use_container_width=True):
+                show_setup_documentation_modal()
+        
+        st.caption("⚠️ **Disclaimer:** These are setups based exclusively on technical indicators. The user must do proper due diligence and risk assessment before committing money in the market.")
+        st.divider()
+        
+        st.markdown("Specify the universes, custom CSVs, or tickers you want to scan. We will rank them using your active Fundamental/Technical weights, take the **Top N**, and hunt for technical setups.")
+        
+        with st.form("su_form"):
+            col_u1, col_u2 = st.columns([2, 1])
+            with col_u1:
+                su_default = st.session_state.get("su_universes", ["Nifty 50"])
+                su_default = [x for x in su_default if x in UNIVERSE_SOURCE_OPTIONS]
+                if not su_default: 
+                    su_default = ["Nifty 50"]
                     
-                    if ranked_df_su.empty:
-                        st.error("Could not retrieve price data to rank the selected stocks.")
+                selected_universes_su = st.multiselect(
+                    "Select Universes",
+                    options=UNIVERSE_SOURCE_OPTIONS,
+                    default=su_default,
+                    help="You can select multiple index lists or F&O stocks at once. These save to your profile automatically."
+                )
+            with col_u2:
+                top_n_su = st.number_input(
+                    "Top N Stocks to Scan for Setups", 
+                    min_value=1, max_value=1000, value=50, 
+                    help="We will rank the combined list and only look for setups in the top N."
+                )
+            
+            with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
+                uploaded_csv_su = st.file_uploader(
+                    "Upload Universe File",
+                    type=["csv", "xlsx", "xls"],
+                    key="su_csv",
+                    label_visibility="collapsed",
+                )
+            
+            custom_raw_su = st.text_input(
+                "Add Custom Tickers",
+                value="",
+                key="su_custom",
+                help="A comma separated symbol list is expected (e.g. TRENT, HAL, TATAMOTORS). Spaces are fine, and .NS is added automatically."
+            )
+            
+            force_refresh_su = st.checkbox("Force fresh price data (ignore cache)", value=False)
+
+            btn_run_setups = st.form_submit_button("Run Scan", type="primary", use_container_width=True)
+
+        if btn_run_setups:
+            
+            st.session_state["su_universes"] = selected_universes_su
+            save_user_settings_to_db()
+
+            csv_tickers_su = []
+            if uploaded_csv_su is not None:
+                try:
+                    if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
+                        csv_df_su = pd.read_excel(uploaded_csv_su)
                     else:
-                        top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
-                        top_tickers_list = top_ranked_df["Ticker"].tolist()
+                        csv_df_su = pd.read_csv(uploaded_csv_su)
+                    csv_tickers_su = parse_broker_symbols(csv_df_su)
+                    if csv_tickers_su:
+                        st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
+                    else:
+                        st.error("Could not detect a symbol column in the uploaded file.")
+                except Exception as e:
+                    st.error(f"Error parsing universe file: {e}")
+
+            all_tickers_su = []
+            for univ in selected_universes_su:
+                if univ == "F&O Stocks":
+                    all_tickers_su.extend(load_fo_stocks())
+                else:
+                    all_tickers_su.extend(load_index_list(univ))
+            
+            custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
+            
+            all_tickers_su.extend(csv_tickers_su)
+            all_tickers_su.extend(custom_tickers_su)
+            all_tickers_su = list(set(all_tickers_su))
+            
+            if not all_tickers_su:
+                st.warning("No tickers found. Please select a universe, upload a CSV, or add custom tickers.")
+            else:
+                if force_refresh_su:
+                    fetch_daily.clear()
+                    fetch_info.clear()
+                    
+                with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
+                    ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
+                
+                if ranked_df_su.empty:
+                    st.error("Could not retrieve price data to rank the selected stocks.")
+                else:
+                    top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
+                    top_tickers_list = top_ranked_df["Ticker"].tolist()
+                    
+                    st.write(f"Hunting for technical setups within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
+                    progress_bar = st.progress(0)
+                    setup_results = []
+                    
+                    for i, ticker in enumerate(top_tickers_list):
+                        df = fetch_daily(ticker)
+                        if df is not None and not df.empty:
+                            triggered_tags = check_stocks_setting_up(df)
+                            if triggered_tags:
+                                setup_results.append({
+                                    "Ticker": ticker.replace('.NS', ''),
+                                    "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
+                                    "LTP": round(df['Close'].iloc[-1], 2),
+                                    "Setups Triggered": " | ".join(triggered_tags)
+                                })
+                        progress_bar.progress((i + 1) / len(top_tickers_list))
                         
-                        st.write(f"Hunting for technical setups within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
-                        progress_bar = st.progress(0)
-                        setup_results = []
+                    st.success("Setup Scan Complete!")
+                    
+                    if setup_results:
+                        results_df_su = pd.DataFrame(setup_results)
                         
-                        for i, ticker in enumerate(top_tickers_list):
-                            df = fetch_daily(ticker)
-                            if df is not None and not df.empty:
-                                triggered_tags = check_stocks_setting_up(df)
-                                if triggered_tags:
-                                    setup_results.append({
-                                        "Ticker": ticker.replace('.NS', ''),
-                                        "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
-                                        "LTP": round(df['Close'].iloc[-1], 2),
-                                        "Setups Triggered": " | ".join(triggered_tags)
-                                    })
-                            progress_bar.progress((i + 1) / len(top_tickers_list))
-                            
-                        st.success("Setup Scan Complete!")
+                        st.divider()
+                        st.subheader("📈 TradingView 1-Click Clipboard Exporter")
+                        tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
+                        tv_content_su = ",".join(tv_symbols_su)
                         
-                        if setup_results:
-                            results_df_su = pd.DataFrame(setup_results)
+                        st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
+                        if tv_symbols_su:
+                            st.code(tv_content_su, language="text")
                             
-                            st.divider()
-                            st.subheader("📈 TradingView 1-Click Clipboard Exporter")
-                            tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
-                            tv_content_su = ",".join(tv_symbols_su)
-                            
-                            st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
-                            if tv_symbols_su:
-                                st.code(tv_content_su, language="text")
-                                
-                            st.divider()
-                            st.subheader("📋 Stocks Setting Up")
-                            st.dataframe(results_df_su, use_container_width=True, hide_index=True)
-                        else:
-                            st.info(f"None of the Top {top_n_su} ranked stocks triggered a setup today. The market might be choppy or extended.")
+                        st.divider()
+                        st.subheader("📋 Stocks Setting Up")
+                        st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(f"None of the Top {top_n_su} ranked stocks triggered a setup today. The market might be choppy or extended.")
 
     # ==================================================================================
     # TAB 4: USER GUIDE
     # ==================================================================================
-    with tab_controls:
+    elif selected_tab == "🎛️ User-defined controls":
         st.subheader("User-defined controls")
         st.caption("These apply to every scan and to the top-scores email. They are saved for this account.")
         st.markdown("**Pillar weights (sum to 10)**")
@@ -2438,7 +2431,7 @@ def _run_streamlit_ui():
                     st.session_state.pop("digest_preview", None)
                     st.rerun()
 
-    with tab_guide:
+    elif selected_tab == "ℹ️ User Guide":
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
         st.markdown(
             """
@@ -2527,130 +2520,129 @@ def _run_streamlit_ui():
     # ==================================================================================
     # TAB 5: ADMIN PANEL (DYNAMIC ROLE-BASED)
     # ==================================================================================
-    if user_is_admin and tab_admin is not None:
-        with tab_admin:
-            st.subheader("🛠️ Administrator Control & Registered System Users")
-            st.success(f"Authenticated Administrator Access: `{user_email}`")
+    elif selected_tab == "🛠️ Admin Panel":
+        st.subheader("🛠️ Administrator Control & Registered System Users")
+        st.success(f"Authenticated Administrator Access: `{user_email}`")
+    
+        st.divider()
+    
+        col_adm1, col_adm2 = st.columns([1, 1.2])
+    
+        with col_adm1:
+            st.markdown("#### 📊 System Diagnostics")
+            st.json({
+                "Admin Email": user_email,
+                "Admin Status": "Verified via profiles.role",
+                "Supabase Connection": SUPABASE_AVAILABLE and get_supabase_client() is not None,
+                "Active Weights": {
+                    "Fundamental": w_fund,
+                    "Technical": w_tech,
+                }
+            })
         
-            st.divider()
-        
-            col_adm1, col_adm2 = st.columns([1, 1.2])
-        
-            with col_adm1:
-                st.markdown("#### 📊 System Diagnostics")
-                st.json({
-                    "Admin Email": user_email,
-                    "Admin Status": "Verified via profiles.role",
-                    "Supabase Connection": SUPABASE_AVAILABLE and get_supabase_client() is not None,
-                    "Active Weights": {
-                        "Fundamental": w_fund,
-                        "Technical": w_tech,
-                    }
-                })
-            
-                if st.button(
-                    "🧹 Clear Global Application Cache",
-                    use_container_width=True,
-                    help="Drop cached NSE lists and price downloads so the next scan fetches live data. Does not delete user settings.",
-                ):
-                    st.cache_data.clear()
-                    st.success("Global application cache cleared.")
-                if st.button(
-                    "🌐 Check Universe Source Status (live fetch)",
-                    use_container_width=True,
-                    help="Hit NSE for every index and F&O source and report whether live lists or fallbacks were used.",
-                ):
-                    with st.spinner("Fetching all 6 universe sources — this hits NSE live and may take a moment..."):
-                        status_rows = []
-                        for name in NSE_INDEX_FILES:
-                            lst = load_index_list(name)
-                            is_fallback = lst == FALLBACK_INDEX_LISTS.get(name)
-                            status_rows.append({"Source": name, "Tickers": len(lst), "Using Fallback?": "⚠️ Yes" if is_fallback else "✅ Live"})
-                        
-                        fo_tier_used = "None — using fallback"
-                        fo_tickers = []
-                        for tier_name, tier_fn in [
-                            ("Tier 1: stockIndices API", _fo_tier1_stock_indices),
-                            ("Tier 2: equity-master API", _fo_tier2_equity_master),
-                            ("Tier 3: dated CSV guess", _fo_tier3_dated_csv),
-                        ]:
-                            fo_tickers = tier_fn()
-                            if fo_tickers:
-                                fo_tier_used = tier_name
-                                break
-                        if not fo_tickers:
-                            fo_tickers = FALLBACK_FO_STOCKS
-                        status_rows.append({
-                            "Source": "F&O Stocks", "Tickers": len(fo_tickers), "Using Fallback?": fo_tier_used
-                        })
-                    st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
-                    st.caption(
-                        "F&O now tries 3 independent live sources before falling back — this shows which one "
+            if st.button(
+                "🧹 Clear Global Application Cache",
+                use_container_width=True,
+                help="Drop cached NSE lists and price downloads so the next scan fetches live data. Does not delete user settings.",
+            ):
+                st.cache_data.clear()
+                st.success("Global application cache cleared.")
+            if st.button(
+                "🌐 Check Universe Source Status (live fetch)",
+                use_container_width=True,
+                help="Hit NSE for every index and F&O source and report whether live lists or fallbacks were used.",
+            ):
+                with st.spinner("Fetching all 6 universe sources — this hits NSE live and may take a moment..."):
+                    status_rows = []
+                    for name in NSE_INDEX_FILES:
+                        lst = load_index_list(name)
+                        is_fallback = lst == FALLBACK_INDEX_LISTS.get(name)
+                        status_rows.append({"Source": name, "Tickers": len(lst), "Using Fallback?": "⚠️ Yes" if is_fallback else "✅ Live"})
+                    
+                    fo_tier_used = "None — using fallback"
+                    fo_tickers = []
+                    for tier_name, tier_fn in [
+                        ("Tier 1: stockIndices API", _fo_tier1_stock_indices),
+                        ("Tier 2: equity-master API", _fo_tier2_equity_master),
+                        ("Tier 3: dated CSV guess", _fo_tier3_dated_csv),
+                    ]:
+                        fo_tickers = tier_fn()
+                        if fo_tickers:
+                            fo_tier_used = tier_name
+                            break
+                    if not fo_tickers:
+                        fo_tickers = FALLBACK_FO_STOCKS
+                    status_rows.append({
+                        "Source": "F&O Stocks", "Tickers": len(fo_tickers), "Using Fallback?": fo_tier_used
+                    })
+                st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
+                st.caption(
+                    "F&O now tries 3 independent live sources before falling back — this shows which one "
                         "(if any) actually succeeded, so you know exactly where the data came from."
-                    )
-            with col_adm2:
-                st.markdown("#### 👥 Registered System Users Directory")
-                supabase = get_supabase_client()
-                user_list = []
-            
-                if supabase:
-                    try:
-                        session = st.session_state.get("supabase_session")
-                        if session and hasattr(session, "access_token"):
-                            supabase.postgrest.auth(session.access_token)
-                        profiles_res = supabase.table("profiles").select("*").execute()
-                    
-                        if profiles_res.data:
-                            for u in profiles_res.data:
-                                user_list.append({
-                                    "Email": u.get("email", "N/A"),
-                                    "Role": u.get("role", "user").capitalize(),
-                                    "User ID": u.get("id"),
-                                    "Created At": str(u.get("created_at", ""))[:10]
-                                })
-                    except Exception as e:
-                        st.error(f"Error reading profiles table: {e}")
-                
-                if user_list:
-                    st.dataframe(pd.DataFrame(user_list), use_container_width=True, hide_index=True)
-                    st.caption(f"Total Registered Users Located: **{len(user_list)}**")
-                    
-                    st.divider()
-                    st.markdown("#### 🔐 User Authorization Management")
-                    st.caption("Grant users 'Authorized' status to unlock the 'Stocks Setting Up' module.")
-                    
-                    user_options = { f"{u['Email']} (Role: {u['Role']})": u['User ID'] for u in user_list }
-                    selected_user_label = st.selectbox("Select User to Modify:", options=list(user_options.keys()), key="admin_auth_user")
-                    
-                    if selected_user_label:
-                        selected_uid = user_options[selected_user_label]
-                        c_auth1, c_auth2 = st.columns(2)
-                        with c_auth1:
-                            if st.button("Grant 'Authorized' Access", use_container_width=True):
-                                try:
-                                    supabase.table("profiles").update({"role": "authorized"}).eq("id", selected_uid).execute()
-                                    st.success("User authorized! (Refresh page to see changes)")
-                                except Exception as e:
-                                    st.error(f"Error updating user: {e}")
-                        with c_auth2:
-                            if st.button("Revoke Access (Set to 'user')", use_container_width=True):
-                                try:
-                                    supabase.table("profiles").update({"role": "user"}).eq("id", selected_uid).execute()
-                                    st.success("User access revoked! (Refresh page to see changes)")
-                                except Exception as e:
-                                    st.error(f"Error updating user: {e}")
-                else:
-                    st.info("ℹ️ No users found in `profiles` table. Make sure you ran the SQL trigger setup in Supabase Editor.")
-            
-            st.divider()
-            st.markdown("#### 🗄️ Database Record Inspection (`user_settings`)")
+                )
+        with col_adm2:
+            st.markdown("#### 👥 Registered System Users Directory")
+            supabase = get_supabase_client()
+            user_list = []
+        
             if supabase:
                 try:
-                    full_res = supabase.table("user_settings").select("*").execute()
-                    if full_res.data:
-                        st.dataframe(pd.DataFrame(full_res.data), use_container_width=True)
+                    session = st.session_state.get("supabase_session")
+                    if session and hasattr(session, "access_token"):
+                        supabase.postgrest.auth(session.access_token)
+                    profiles_res = supabase.table("profiles").select("*").execute()
+                
+                    if profiles_res.data:
+                        for u in profiles_res.data:
+                            user_list.append({
+                                "Email": u.get("email", "N/A"),
+                                "Role": u.get("role", "user").capitalize(),
+                                "User ID": u.get("id"),
+                                "Created At": str(u.get("created_at", ""))[:10]
+                            })
                 except Exception as e:
-                    st.error(f"Error fetching table data: {e}")
+                    st.error(f"Error reading profiles table: {e}")
+            
+            if user_list:
+                st.dataframe(pd.DataFrame(user_list), use_container_width=True, hide_index=True)
+                st.caption(f"Total Registered Users Located: **{len(user_list)}**")
+                
+                st.divider()
+                st.markdown("#### 🔐 User Authorization Management")
+                st.caption("Grant users 'Authorized' status to unlock the 'Stocks Setting Up' module.")
+                
+                user_options = { f"{u['Email']} (Role: {u['Role']})": u['User ID'] for u in user_list }
+                selected_user_label = st.selectbox("Select User to Modify:", options=list(user_options.keys()), key="admin_auth_user")
+                
+                if selected_user_label:
+                    selected_uid = user_options[selected_user_label]
+                    c_auth1, c_auth2 = st.columns(2)
+                    with c_auth1:
+                        if st.button("Grant 'Authorized' Access", use_container_width=True):
+                            try:
+                                supabase.table("profiles").update({"role": "authorized"}).eq("id", selected_uid).execute()
+                                st.success("User authorized! (Refresh page to see changes)")
+                            except Exception as e:
+                                st.error(f"Error updating user: {e}")
+                    with c_auth2:
+                        if st.button("Revoke Access (Set to 'user')", use_container_width=True):
+                            try:
+                                supabase.table("profiles").update({"role": "user"}).eq("id", selected_uid).execute()
+                                st.success("User access revoked! (Refresh page to see changes)")
+                            except Exception as e:
+                                st.error(f"Error updating user: {e}")
+            else:
+                st.info("ℹ️ No users found in `profiles` table. Make sure you ran the SQL trigger setup in Supabase Editor.")
+        
+        st.divider()
+        st.markdown("#### 🗄️ Database Record Inspection (`user_settings`)")
+        if supabase:
+            try:
+                full_res = supabase.table("user_settings").select("*").execute()
+                if full_res.data:
+                    st.dataframe(pd.DataFrame(full_res.data), use_container_width=True)
+            except Exception as e:
+                st.error(f"Error fetching table data: {e}")
 
     # ----------------------------------------------------------------------------------
     # Footer
