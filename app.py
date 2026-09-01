@@ -1169,16 +1169,6 @@ def show_pillar_details_modal(row_data):
             active = "Active" if st.session_state.get(f"tech_{k}", True) else "Disabled"
             tech_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
         st.dataframe(pd.DataFrame(tech_items), use_container_width=True, hide_index=True)
-    if SUPABASE_AVAILABLE:
-        st.divider()
-        st.markdown("**📈 Score History**")
-        _user = st.session_state.get("user")
-        _uid = _user.get("id") if isinstance(_user, dict) else getattr(_user, "id", None)
-        history_df = load_scan_history(_uid, ticker) if _uid else pd.DataFrame()
-        if history_df.empty:
-            st.caption("No history yet for this ticker — it'll build up as you run scans over time.")
-        else:
-            st.line_chart(history_df.set_index("scan_time")[["total_score", "fundamental_score", "technical_score"]])
     st.divider()
     if st.button(
         "❌ Close Breakdown",
@@ -2037,7 +2027,7 @@ def _run_streamlit_ui():
                         type="primary",
                         help="Show why this ticker received its fundamental and technical scores.",
                     ):
-                        st.session_state["active_inspect_ticker"] = selected_ticker
+                        st.session_state["active_inspect_ticker"] = st.session_state.get("scr_select_tkr")
                         st.rerun()
                 st.dataframe(
                     display_table,
@@ -2379,42 +2369,33 @@ def _run_streamlit_ui():
         
         st.markdown("**Pillar weights (sum to 10)**")
         
-        current_w_fund = int(st.session_state.get("w_fund", 5))
-        current_w_tech = int(st.session_state.get("w_tech", 5))
-        
-        new_w_fund = st.slider(
-            "Fundamental Weight",
-            0,
-            10,
-            value=current_w_fund,
-            key="slider_w_fund",
-            help="Share of Total from the CANSLIM score. Technical is set to 10 minus this, so the two always add to 10.",
-        )
-        
-        if new_w_fund != current_w_fund:
-            st.session_state["w_fund"] = new_w_fund
-            st.session_state["w_tech"] = 10 - new_w_fund
+        def update_w_fund():
+            st.session_state["w_tech"] = 10 - st.session_state["w_fund"]
             save_user_settings_to_db()
             _persist_digest_pref()
-            st.rerun()
 
-        new_w_tech = st.slider(
-            "Technical Weight",
-            0,
-            10,
-            value=current_w_tech,
-            key="slider_w_tech",
-            help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this. Leadership vs Nifty/sector is inside fundamentals (L / Ls).",
-        )
-        
-        if new_w_tech != current_w_tech and new_w_fund == current_w_fund:
-            st.session_state["w_tech"] = new_w_tech
-            st.session_state["w_fund"] = 10 - new_w_tech
+        def update_w_tech():
+            st.session_state["w_fund"] = 10 - st.session_state["w_tech"]
             save_user_settings_to_db()
             _persist_digest_pref()
-            st.rerun()
+        
+        st.slider(
+            "Fundamental Weight",
+            0, 10,
+            key="w_fund",
+            on_change=update_w_fund,
+            help="Share of Total from the CANSLIM score. Technical is set to 10 minus this.",
+        )
+        
+        st.slider(
+            "Technical Weight",
+            0, 10,
+            key="w_tech",
+            on_change=update_w_tech,
+            help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this.",
+        )
             
-        st.caption(f"Fundamental {int(st.session_state.get('w_fund', 5))} + Technical {int(st.session_state.get('w_tech', 5))} = 10")
+        st.caption(f"Fundamental {st.session_state.get('w_fund', 5)} + Technical {st.session_state.get('w_tech', 5)} = 10")
         
         st.markdown("**Pillar customization**")
         c_fund, c_tech = st.columns(2)
