@@ -2356,37 +2356,44 @@ def _run_streamlit_ui():
         
         st.markdown("**Pillar weights (sum to 10)**")
         
-        def update_w_fund():
-            val = st.session_state.slider_w_fund
+        def update_fund_from_num():
+            val = st.session_state.num_w_fund
             st.session_state["w_fund"] = val
             st.session_state["w_tech"] = 10 - val
+            st.session_state.num_w_tech = 10 - val
             save_user_settings_to_db()
             _persist_digest_pref()
 
-        def update_w_tech():
-            val = st.session_state.slider_w_tech
+        def update_tech_from_num():
+            val = st.session_state.num_w_tech
             st.session_state["w_tech"] = val
             st.session_state["w_fund"] = 10 - val
+            st.session_state.num_w_fund = 10 - val
             save_user_settings_to_db()
             _persist_digest_pref()
-        
-        st.slider(
-            "Fundamental Weight",
-            0, 10,
-            value=int(st.session_state.get("w_fund", 5)),
-            key="slider_w_fund",
-            on_change=update_w_fund,
-            help="Share of Total from the CANSLIM score. Technical is set to 10 minus this.",
-        )
-        
-        st.slider(
-            "Technical Weight",
-            0, 10,
-            value=int(st.session_state.get("w_tech", 5)),
-            key="slider_w_tech",
-            on_change=update_w_tech,
-            help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this.",
-        )
+            
+        if "num_w_fund" not in st.session_state:
+            st.session_state.num_w_fund = int(st.session_state.get("w_fund", 5))
+        if "num_w_tech" not in st.session_state:
+            st.session_state.num_w_tech = int(st.session_state.get("w_tech", 5))
+            
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            st.number_input(
+                "Fundamental Weight",
+                min_value=0, max_value=10, step=1,
+                key="num_w_fund",
+                on_change=update_fund_from_num,
+                help="Share of Total from the CANSLIM score. Technical is set to 10 minus this.",
+            )
+        with col_w2:
+            st.number_input(
+                "Technical Weight",
+                min_value=0, max_value=10, step=1,
+                key="num_w_tech",
+                on_change=update_tech_from_num,
+                help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this.",
+            )
             
         st.caption(f"Fundamental {st.session_state.get('w_fund', 5)} + Technical {st.session_state.get('w_tech', 5)} = 10")
         
@@ -2535,7 +2542,7 @@ def _run_streamlit_ui():
         st.markdown("#### **3. User-defined controls (weights, rules, top scores)**")
         st.markdown(
             """
-            * **Adjust Weights:** On **User-defined controls**, slide **Fundamental Weight** or **Technical Weight**. They always add to **10** — moving one fills the remainder on the other.
+            * **Adjust Weights:** On **User-defined controls**, change **Fundamental Weight** or **Technical Weight**. They always add to **10** — changing one adjusts the other automatically.
             * **Customize Rules:** On **User-defined controls**, click **Fundamental Rules** or **Technical Rules** to toggle specific criteria on/off.
             * **Auto-Persistence:** Your customized weights and active rule parameters automatically save to Supabase and persist across future logins.
             * **Top scores email:** On **User-defined controls**, check **Email me top scores**. This is sent once every day with the highest-scoring stocks from each NSE index/group. Set **Number of stocks per group/index** for how many rows to include. Click **Show top scores** to preview now — the preview also has a TradingView copy of the unique top names across all lists. This is a score ranking, not a stock pick.
