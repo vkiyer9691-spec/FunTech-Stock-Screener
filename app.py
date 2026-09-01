@@ -138,6 +138,8 @@ AVAILABLE_SETUPS = [
     "RSI Resumption",
     "Vol Squeeze",
     "20-EMA Bounce",
+    "Bottom Fisher",
+    "Pocket Pivot",
 ]
 
 DEFAULT_FUND_PARAMS = {
@@ -1230,19 +1232,20 @@ def show_setup_documentation_modal():
     
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
-    """)
     
-    # --- TEMPORARILY COMMENTED OUT FOR REFINEMENT ---
-    # st.markdown("""
-    # **6. Bottom Fisher (Macro Reversal)**
-    # *(Temporarily disabled for algorithm refinement)*
-    # Identifies stocks bouncing from a true macro bottom.
-    # - **Drop Rule:** `L0` (the bottom) must be >= 15% below the recent 150-day peak.
-    # - **Thrust Rule:** Initial bounce `H1` must be >= 5% above `L0`, with Daily RSI surging >= 60.
-    # - **Pullback Rule:** The dip to `L1` must retrace >= 25% of the initial thrust.
-    # - **Confirmation:** Either a Higher Low (with RSI > 40) or a Lower Low with *Weekly* RSI Bullish Divergence.
-    # - **Trigger:** Breaking out cleanly above `H1` today, or successfully retesting the breakout line within 1%.
-    # """)
+    **6. Bottom Fisher (Institutional Exhaustion & Reversal)**
+    Detects macro trend reversals using a 4-phase institutional footprint sequence:
+    - **Phase 1 (The Flush):** Price must be at least 30% below its 52-week high, indicating a severe prior downtrend.
+    - **Phase 2 (The Footprint):** After hitting a local low ($L_0$), the stock must produce a sharp thrust upward that forces Daily RSI $\\ge$ 60 (proving institutional accumulation has arrested the fall).
+    - **Phase 3 (The Exhaustion Pullback):** The stock pulls back to form $L_1$ on strictly shrinking volume ($< 60\\%$ of its 20-day average), and crucially, the Daily RSI must remain $\\ge$ 40 on the day $L_1$ is printed, proving the momentum regime has successfully flipped to bullish.
+    - **Phase 4 (The Trigger):** The 20-day EMA must have flattened out or curled up, and the RSI must have pushed upward for two consecutive days since $L_1$ to confirm the pivot is holding.
+    
+    **7. Pocket Pivot (Base Accumulation)**
+    Identifies institutional buying inside a constructive base before a traditional resistance breakout occurs:
+    - **Context:** The stock is trading above its 200-DMA, and its 50-DMA is flattening or sloping upward.
+    - **Support Interaction:** The low of the day must drop within $1.5\\%$ of either the 10-EMA or the 50-SMA (a "kiss" of support) and close firmly in the upper $40\\%$ of its daily range.
+    - **Volume Signature:** It must be an "Up" day (Close > Yesterday Close) with trading volume strictly higher than the largest "Down" day volume seen over the previous 10 trading sessions.
+    """)
 
     if st.button("Close", use_container_width=True):
         st.rerun()
@@ -1300,8 +1303,10 @@ def check_stocks_setting_up(df, enabled_setups=None):
         
         df['RSI'] = ta.rsi(df['Close'], length=14)
         
+        df['EMA_10'] = ta.ema(df['Close'], length=10)
         df['EMA_20'] = ta.ema(df['Close'], length=20)
         df['SMA_50'] = ta.sma(df['Close'], length=50)
+        df['SMA_200'] = ta.sma(df['Close'], length=200)
         df['Vol_20_SMA'] = ta.sma(df['Volume'], length=20)
     except:
         return []
@@ -1404,52 +1409,90 @@ def check_stocks_setting_up(df, enabled_setups=None):
         if strong_trend and touched_ema and closed_strong:
             tags.append("✔️ 20-EMA Bounce")
 
-    # --- TEMPORARILY COMMENTED OUT FOR REFINEMENT ---
-    # # SETUP 6: Bottom Fisher (Strict Geometric Reversal)
-    # if "Bottom Fisher" in enabled_setups:
-    #     try:
-    #         macro_window = df.iloc[-120:-10]
-    #         idx_L0 = macro_window['Low'].idxmin()
-    #         price_L0 = df.loc[idx_L0, 'Low']
-    #         max_high_recent = df['High'].tail(150).max()
-    #         if price_L0 <= max_high_recent * 0.85:
-    #             if idx_L0 < df.index[-3]:
-    #                 thrust_window = df.loc[idx_L0:df.index[-3]]
-    #                 idx_H1 = thrust_window['High'].idxmax()
-    #                 price_H1 = df.loc[idx_H1, 'High']
-    #                 if price_H1 >= price_L0 * 1.05:
-    #                     max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
-    #                     if max_rsi_thrust >= 60:
-    #                         pullback_window = df.loc[idx_H1:]
-    #                         idx_L1 = pullback_window['Low'].idxmin()
-    #                         price_L1 = df.loc[idx_L1, 'Low']
-    #                         thrust_range = price_H1 - price_L0
-    #                         if price_L1 <= price_H1 - (thrust_range * 0.25):
-    #                             valid_pullback = False
-    #                             if price_L1 > price_L0:
-    #                                 rsi_L1 = df.loc[idx_L1, 'RSI']
-    #                                 if 40 <= rsi_L1 <= 55:
-    #                                     valid_pullback = True
-    #                             else:
-    #                                 if not weekly.empty and 'RSI_W' in weekly.columns:
-    #                                     week_L0_list = weekly.index[weekly.index >= idx_L0]
-    #                                     week_L1_list = weekly.index[weekly.index >= idx_L1]
-    #                                     if len(week_L0_list) > 0 and len(week_L1_list) > 0:
-    #                                         week_L0 = week_L0_list[0]
-    #                                         week_L1 = week_L1_list[0]
-    #                                         rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
-    #                                         rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
-    #                                         if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
-    #                                             valid_pullback = True
-    #                             if valid_pullback and idx_L1 < today.name:
-    #                                 closes_since_L1 = df.loc[idx_L1:, 'Close']
-    #                                 has_broken_out = closes_since_L1.max() > price_H1
-    #                                 is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
-    #                                 is_retesting = has_broken_out and (today['Close'] >= price_H1 * 0.99) and (today['Low'] <= price_H1 * 1.02)
-    #                                 if is_breakout_today or is_retesting:
-    #                                     tags.append("✔️ Bottom Fisher")
-    #     except Exception:
-    #         pass
+    # SETUP 6: Bottom Fisher (Phase 1-4 Institutional Exhaustion)
+    if "Bottom Fisher" in enabled_setups:
+        try:
+            # Phase 1: Macro Damage (30% drop from 52w High)
+            max_high_252 = df['High'].tail(252).max()
+            macro_window = df.iloc[-150:-5]
+            if not macro_window.empty:
+                idx_L0 = macro_window['Low'].idxmin()
+                price_L0 = df.loc[idx_L0, 'Low']
+                
+                if price_L0 <= max_high_252 * 0.70:
+                    
+                    # Phase 2: Change of Character (RSI >= 60 thrust)
+                    thrust_window = df.loc[idx_L0:df.index[-3]]
+                    if not thrust_window.empty and len(thrust_window) > 2:
+                        idx_H1 = thrust_window['High'].idxmax()
+                        max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
+                        
+                        if max_rsi_thrust >= 60:
+                            
+                            # Phase 3: Exhaustion Pullback (L1, RSI >= 40, Vol Dryup)
+                            pullback_window = df.loc[idx_H1:df.index[-2]]
+                            if not pullback_window.empty:
+                                idx_L1 = pullback_window['Low'].idxmin()
+                                price_L1 = df.loc[idx_L1, 'Low']
+                                rsi_L1 = df.loc[idx_L1, 'RSI']
+                                vol_L1 = df.loc[idx_L1, 'Volume']
+                                vol_sma_L1 = df.loc[idx_L1, 'Vol_20_SMA']
+                                
+                                if rsi_L1 >= 40 and vol_L1 < (vol_sma_L1 * 0.60):
+                                    
+                                    # Phase 4: Trigger (RSI up 2 days, 20 EMA flattening)
+                                    loc_L1 = df.index.get_loc(idx_L1)
+                                    loc_today = len(df) - 1
+                                    
+                                    if loc_today - loc_L1 >= 2:
+                                        rsi_today = df['RSI'].iloc[-1]
+                                        rsi_yest = df['RSI'].iloc[-2]
+                                        rsi_prev = df['RSI'].iloc[-3]
+                                        
+                                        if rsi_today > rsi_yest > rsi_prev:
+                                            ema20_today = df['EMA_20'].iloc[-1]
+                                            ema20_prev = df['EMA_20'].iloc[-3]
+                                            if ema20_today >= ema20_prev:
+                                                tags.append("✔️ Bottom Fisher")
+        except Exception:
+            pass
+
+    # SETUP 7: Pocket Pivot (Institutional Accumulation inside Base)
+    if "Pocket Pivot" in enabled_setups:
+        try:
+            ema10 = df['EMA_10'].iloc[-1]
+            sma50 = df['SMA_50'].iloc[-1]
+            sma200 = df['SMA_200'].iloc[-1]
+            
+            # Trend Context: Above 200-DMA, 50-DMA flattening/sloping up
+            if pd.notna(sma200) and today['Close'] > sma200:
+                sma50_5d_ago = df['SMA_50'].iloc[-5]
+                if pd.notna(sma50_5d_ago) and sma50 >= sma50_5d_ago:
+                    
+                    # Support Interaction: Low dips within 1.5% of 10-EMA or 50-SMA
+                    low_dist_10 = abs(today['Low'] - ema10) / ema10 if pd.notna(ema10) else 99
+                    low_dist_50 = abs(today['Low'] - sma50) / sma50 if pd.notna(sma50) else 99
+                    
+                    if min(low_dist_10, low_dist_50) <= 0.015:
+                        daily_range = today['High'] - today['Low']
+                        if daily_range > 0:
+                            close_pct = (today['Close'] - today['Low']) / daily_range
+                            if close_pct >= 0.60: # Close in upper 40% of range
+                                
+                                # Volume Signature: Up day, Vol > Max Down Vol in last 10 days
+                                if today['Close'] > yest['Close']:
+                                    down_vols = []
+                                    # Look back exactly 10 sessions before today
+                                    for i in range(-11, -1):
+                                        if df['Close'].iloc[i] < df['Close'].iloc[i-1]:
+                                            down_vols.append(df['Volume'].iloc[i])
+                                            
+                                    max_down_vol = max(down_vols) if down_vols else 0
+                                    
+                                    if today['Volume'] > max_down_vol:
+                                        tags.append("✔️ Pocket Pivot")
+        except Exception:
+            pass
 
     return tags
 
