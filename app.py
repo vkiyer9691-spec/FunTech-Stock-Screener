@@ -575,24 +575,40 @@ def get_supabase_client():
             return None
     return None
 
+def get_supabase_admin_client():
+    if not SUPABASE_AVAILABLE:
+        return None
+    url = _cfg("SUPABASE_URL", "supabase", "url")
+    # Tries to use the Service Role Key to bypass RLS in the Admin Panel
+    key = _cfg("SUPABASE_SERVICE_KEY", "supabase", "service_key") or _cfg("SUPABASE_SERVICE_ROLE_KEY", "supabase", "service_role_key")
+    if url and key and url != "None" and key != "None":
+        try:
+            return create_client(url, key)
+        except Exception:
+            return None
+    return None
+
 def is_admin(user) -> bool:
     if not user:
         return False
+    email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+    if email.lower() == "vkiyer@hotmail.com":
+        return True
+        
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     if not user_id:
         return False
     
     supabase = get_supabase_client()
     if not supabase:
-        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
-        return email.lower() == "vkiyer@hotmail.com"
+        return False
     try:
         session = st.session_state.get("supabase_session")
         if session and hasattr(session, "access_token"):
             supabase.postgrest.auth(session.access_token)
         res = supabase.table("profiles").select("role").eq("id", user_id).execute()
         if res.data and len(res.data) > 0:
-            return res.data[0].get("role") == "admin"
+            return str(res.data[0].get("role")).lower().strip() == "admin"
     except Exception:
         pass
     return False
@@ -600,21 +616,26 @@ def is_admin(user) -> bool:
 def is_authorized_or_admin(user) -> bool:
     if not user:
         return False
+        
+    email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
+    if email.lower() == "vkiyer@hotmail.com":
+        return True
+        
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     if not user_id:
         return False
     
     supabase = get_supabase_client()
     if not supabase:
-        email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
-        return email.lower() == "vkiyer@hotmail.com"
+        return False
+        
     try:
         session = st.session_state.get("supabase_session")
         if session and hasattr(session, "access_token"):
             supabase.postgrest.auth(session.access_token)
         res = supabase.table("profiles").select("role").eq("id", user_id).execute()
         if res.data and len(res.data) > 0:
-            role = res.data[0].get("role")
+            role = str(res.data[0].get("role")).lower().strip()
             return role in ["admin", "authorized"]
     except Exception:
         pass
@@ -1836,38 +1857,51 @@ def _run_streamlit_ui():
     # ==================================================================================
     if selected_tab == "🔍 Stock Screener":
         st.subheader("Screener universe")
-        universe_source = st.selectbox(
+        
+        universe_sources = st.multiselect(
             "Universe Source",
             options=UNIVERSE_SOURCE_OPTIONS,
-            index=UNIVERSE_SOURCE_OPTIONS.index("Nifty 500"),
+            default=["Nifty 500"],
             key="scr_universe_source",
-            help="Which NSE index or F&O list to load. Live constituents are cached 24 hours; if NSE is unreachable the app uses a small built-in list.",
+            help="Select one or more NSE indices or F&O lists to load."
         )
-        with st.status(f"Loading {universe_source}...", expanded=False) as _status:
-            if universe_source == "F&O Stocks":
-                base_list = load_fo_stocks()
-            else:
-                base_list = load_index_list(universe_source)
-            _status.update(label=f"{universe_source}: {len(base_list)} tickers loaded", state="complete")
+        
+        base_list = []
+        if universe_sources:
+            with st.status("Loading universes...", expanded=False) as _status:
+                for univ in universe_sources:
+                    if univ == "F&O Stocks":
+                        base_list.extend(load_fo_stocks())
+                    else:
+                        base_list.extend(load_index_list(univ))
+                base_list = list(dict.fromkeys(base_list))
+                _status.update(label=f"Loaded {len(base_list)} tickers from selected universes", state="complete")
+        
         _tracker = _get_freshness_tracker()
-        _univ_info = _tracker.get(f"universe:{universe_source}")
-        _price_ts = _tracker.get("prices")
         _freshness_lines = []
-        if _univ_info:
-            _ts, _kind = _univ_info
-            _age_min = (pd.Timestamp.now() - _ts).total_seconds() / 60
-            _icon = "✅" if _kind == "live" else "⚠️"
-            _freshness_lines.append(f"{_icon} {universe_source} list: {_kind}, {_age_min:.0f} min ago")
-        else:
-            _freshness_lines.append(f"ℹ️ {universe_source} list: served from cache this session")
+        for univ in universe_sources:
+            _univ_info = _tracker.get(f"universe:{univ}")
+            if _univ_info:
+                _ts, _kind = _univ_info
+                _age_min = (pd.Timestamp.now() - _ts).total_seconds() / 60
+                _icon = "✅" if _kind == "live" else "⚠️"
+                _freshness_lines.append(f"{_icon} {univ}: {_kind}, {_age_min:.0f} min ago")
+            else:
+                _freshness_lines.append(f"ℹ️ {univ}: served from cache this session")
+
+        _price_ts = _tracker.get("prices")
         if _price_ts:
             _age_min = (pd.Timestamp.now() - _price_ts).total_seconds() / 60
             _freshness_lines.append(f"✅ Price data: last fetched {_age_min:.0f} min ago")
+        
         _last_scan = st.session_state.get("last_scan_time")
         if _last_scan:
             _age_min = (pd.Timestamp.now() - _last_scan).total_seconds() / 60
             _freshness_lines.append(f"🕒 Last scan run: {_age_min:.0f} min ago")
-        st.caption("  \n".join(_freshness_lines))
+            
+        if _freshness_lines:
+            st.caption("  \n".join(_freshness_lines))
+            
         with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
             uploaded_csv = st.file_uploader(
                 "Upload Universe File",
@@ -1890,6 +1924,7 @@ def _run_streamlit_ui():
                     st.error("Could not detect a symbol column in the uploaded file.")
             except Exception as e:
                 st.error(f"Error parsing universe file: {e}")
+                
         full_options = list(dict.fromkeys(base_list + csv_tickers))
         if csv_tickers:
             default_selection = csv_tickers
@@ -1897,12 +1932,15 @@ def _run_streamlit_ui():
         else:
             default_selection = base_list
             universe_state_tag = "idx"
+            
+        univ_key_str = "_".join(universe_sources) if universe_sources else "none"
+        
         selected_universe = st.multiselect(
             "Active Tickers",
             options=full_options,
             default=default_selection,
-            key=f"scr_active_tickers::{universe_source}::{universe_state_tag}",
-            help="Tickers that will be scored. Deselect names to skip them. Switching index or uploading a file resets this list.",
+            key=f"scr_active_tickers::{univ_key_str}::{universe_state_tag}",
+            help="Tickers that will be scored. Deselect names to skip them. Switching indices or uploading a file resets this list.",
         )
         custom_raw = st.text_input(
             "Add Custom Tickers",
@@ -1912,8 +1950,10 @@ def _run_streamlit_ui():
         custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
         watchlist_tickers = []
         universe = list(dict.fromkeys(selected_universe + custom_tickers + watchlist_tickers))
+        
         if len(universe) > 150:
             st.warning(f"{len(universe)} tickers selected — a full scan will take a while.")
+            
         force_refresh = st.checkbox(
             "Force fresh price data (ignore 30-min cache)",
             value=False,
@@ -1928,6 +1968,7 @@ def _run_streamlit_ui():
             use_container_width=True,
             help="Score every ticker in Active Tickers plus any custom symbols, using the weights and rules on User-defined controls. Large lists take several minutes.",
         )
+        
         if run_scan:
             if not universe:
                 st.warning("Select at least one ticker.")
@@ -1942,6 +1983,7 @@ def _run_streamlit_ui():
                     st.session_state["last_scan_time"] = pd.Timestamp.now()
                     if SUPABASE_AVAILABLE and not results_df.empty:
                         save_scan_history(results_df)
+                        
         if "results_df" in st.session_state:
             df = st.session_state["results_df"]
             skipped = st.session_state.get("skipped_tickers", [])
@@ -2543,6 +2585,13 @@ def _run_streamlit_ui():
                     st.session_state.pop("digest_preview", None)
                     st.rerun()
 
+        st.divider()
+        st.markdown("**Manual Save**")
+        if st.button("💾 Save All Settings Now", use_container_width=True, type="primary"):
+            save_user_settings_to_db()
+            _persist_digest_pref()
+            st.success("All your weights, rules, and preferences have been securely saved to your account!")
+
     elif selected_tab == "ℹ️ User Guide":
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
         st.markdown(
@@ -2695,6 +2744,9 @@ def _run_streamlit_ui():
         with col_adm2:
             st.markdown("#### 👥 Registered System Users Directory")
             supabase = get_supabase_client()
+            admin_supabase = get_supabase_admin_client()
+            db_client = admin_supabase if admin_supabase else supabase
+            
             user_list = []
         
             if supabase:
@@ -2732,15 +2784,21 @@ def _run_streamlit_ui():
                     with c_auth1:
                         if st.button("Grant 'Authorized' Access", use_container_width=True):
                             try:
-                                supabase.table("profiles").update({"role": "authorized"}).eq("id", selected_uid).execute()
-                                st.success("User authorized! (Refresh page to see changes)")
+                                res = db_client.table("profiles").update({"role": "authorized"}).eq("id", selected_uid).execute()
+                                if res.data:
+                                    st.success("User authorized! (Refresh page to see changes)")
+                                else:
+                                    st.error("⚠️ Update blocked by Supabase RLS. Add `SUPABASE_SERVICE_KEY` to your secrets.toml, or manually change their role in the Supabase dashboard.")
                             except Exception as e:
                                 st.error(f"Error updating user: {e}")
                     with c_auth2:
                         if st.button("Revoke Access (Set to 'user')", use_container_width=True):
                             try:
-                                supabase.table("profiles").update({"role": "user"}).eq("id", selected_uid).execute()
-                                st.success("User access revoked! (Refresh page to see changes)")
+                                res = db_client.table("profiles").update({"role": "user"}).eq("id", selected_uid).execute()
+                                if res.data:
+                                    st.success("User access revoked! (Refresh page to see changes)")
+                                else:
+                                    st.error("⚠️ Update blocked by Supabase RLS. Add `SUPABASE_SERVICE_KEY` to your secrets.toml, or manually change their role in the Supabase dashboard.")
                             except Exception as e:
                                 st.error(f"Error updating user: {e}")
             else:
