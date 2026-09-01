@@ -2419,10 +2419,20 @@ def _run_streamlit_ui():
             "Sent once every day. Uses your pillar weights and which rules you have turned on. "
             "Not a stock pick or recommendation."
         )
+        
+        def update_opt_in():
+            st.session_state["digest_opt_in"] = st.session_state.chk_digest_opt_in
+            _on_digest_pref_change()
+            
+        def update_top_n():
+            st.session_state["digest_top_n"] = st.session_state.num_digest_top_n
+            _on_digest_pref_change()
+
         st.checkbox(
             "Email me top scores",
-            key="digest_opt_in",
-            on_change=_on_digest_pref_change,
+            value=bool(st.session_state.get("digest_opt_in", False)),
+            key="chk_digest_opt_in",
+            on_change=update_opt_in,
             help="This is sent once every day. Highest-scoring stocks from Nifty 50, Next 50, Midcap 150, Smallcap 250, Nifty 500, and F&O, ranked with your settings. Scores only — not picks.",
         )
         st.number_input(
@@ -2430,8 +2440,9 @@ def _run_streamlit_ui():
             min_value=3,
             max_value=25,
             step=1,
-            key="digest_top_n",
-            on_change=_on_digest_pref_change,
+            value=int(st.session_state.get("digest_top_n", 10)),
+            key="num_digest_top_n",
+            on_change=update_top_n,
             help="How many highest-scoring tickers to list under each index or F&O group (3–25).",
         )
         digest_quick = st.checkbox(
