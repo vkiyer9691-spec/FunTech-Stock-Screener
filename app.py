@@ -1233,9 +1233,9 @@ def show_setup_documentation_modal():
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
     
-    **6. Bottom Fisher (Macro MACD & Daily Dow Reversal)**
+    **6. Bottom Fisher (Macro MACD Regime & Daily Dow Reversal)**
     Detects macro trend reversals using a hybrid Monthly/Daily sequence:
-    - **Phase 1 (The Bleed):** The Monthly MACD must show a prolonged 6-month decline leading up to the bottom (allows for 1 flat/up month tolerance out of the 6 intervals).
+    - **Phase 1 (The Bleed):** The Monthly MACD line must have remained below its Signal line for at least 6 full months leading up to the bottom (capturing a true Stage 4 downtrend regime without being broken by minor 1-month blips).
     - **Phase 2 (The Curl):** The setup triggers during the months where the MACD is continuously sloping upward from the bottom, **up until the month it crosses its signal line**. (It stops flagging once the MACD > Signal cross is fully established, marking the start of Stage 2).
     - **Phase 3 (Daily Dow Reversal):** On the daily chart over the last 120 days, the stock must form an absolute low ($L_0$), a reaction high ($H_1$), and a confirmed Higher Low ($L_1 > L_0$).
     - **Phase 4 (The Trigger):** The daily Close breaks above the $H_1$ resistance pivot, confirmed by Daily RSI $\\ge$ 55, Daily MACD positive/rising, and above-average volume.
@@ -1409,10 +1409,10 @@ def check_stocks_setting_up(df, enabled_setups=None):
         if strong_trend and touched_ema and closed_strong:
             tags.append("✔️ 20-EMA Bounce")
 
-    # SETUP 6: Bottom Fisher (Macro MACD & Daily Dow Reversal)
+    # SETUP 6: Bottom Fisher (Macro MACD Regime & Daily Dow Reversal)
     if "Bottom Fisher" in enabled_setups:
         try:
-            if not monthly.empty and len(monthly) >= 10:
+            if not monthly.empty and len(monthly) >= 12:
                 macd_m = compute_macd(monthly['Close'])
                 if not macd_m.empty and len(macd_m) >= 10:
                     mac = macd_m['MACD'].tolist()
@@ -1437,10 +1437,16 @@ def check_stocks_setting_up(df, enabled_setups=None):
                         if M[B] >= M[B+1]:
                             continue
                             
-                        # Check for the 6-month bleed leading into B
-                        if B + 6 < len(M) and M[B] < M[B+6]:
-                            drops = sum([1 for i in range(B, B+6) if M[i] < M[i+1]])
-                            if drops >= 5:
+                        # Phase 1: Macro Damage (Negative Crossover >= 6 months before B)
+                        # This implies MACD has been below the Signal line for at least 6 months leading up to B
+                        if B + 6 <= len(M):
+                            valid_downtrend = True
+                            for i in range(B, B+6):
+                                if M[i] > S[i]:
+                                    valid_downtrend = False
+                                    break
+                            
+                            if valid_downtrend:
                                 # Ensure we have not already fully crossed the signal line in previous months
                                 if M[1] <= S[1]:
                                     is_valid_macro_bottom = True
