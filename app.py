@@ -1130,6 +1130,7 @@ def customize_technical_modal():
         save_user_settings_to_db()
         st.rerun()
 
+@st.dialog("🔍 Pillar Breakdown Details", width="large")
 def show_pillar_details_modal(row_data):
     ticker = row_data['Ticker']
     st.subheader(f"Symbol: {ticker.replace('.NS', '')}")
@@ -1169,14 +1170,9 @@ def show_pillar_details_modal(row_data):
             active = "Active" if st.session_state.get(f"tech_{k}", True) else "Disabled"
             tech_items.append({"Code": k, "Rule": label, "Status": status, "Rule State": active})
         st.dataframe(pd.DataFrame(tech_items), use_container_width=True, hide_index=True)
+    
     st.divider()
-    if st.button(
-        "❌ Close Breakdown",
-        use_container_width=True,
-        type="primary",
-        help="Close this panel and return to the table.",
-    ):
-        st.session_state["active_inspect_ticker"] = None
+    if st.button("❌ Close Breakdown", use_container_width=True, type="primary"):
         st.rerun()
 
 @st.dialog("📚 Setup Logic Documentation")
@@ -1781,23 +1777,6 @@ def _run_streamlit_ui():
             st.session_state.clear()
             st.rerun()
 
-    target_ticker = st.session_state.get("active_inspect_ticker")
-    if target_ticker:
-        found_row = None
-        if "results_df" in st.session_state and not st.session_state["results_df"].empty:
-            match = st.session_state["results_df"][st.session_state["results_df"]["Ticker"] == target_ticker]
-            if not match.empty:
-                found_row = match.iloc[0].to_dict()
-        if not found_row and "p_results_df" in st.session_state and not st.session_state["p_results_df"].empty:
-            match = st.session_state["p_results_df"][st.session_state["p_results_df"]["Ticker"] == target_ticker]
-            if not match.empty:
-                found_row = match.iloc[0].to_dict()
-        st.session_state["active_inspect_ticker"] = None
-        if found_row:
-            show_pillar_details_modal(found_row)
-        else:
-            st.toast(f"No result data found for {target_ticker}. Please run analysis first.")
-
     def _snapshot_engine():
         w_f = int(st.session_state.get("w_fund", 5))
         w_t = int(st.session_state.get("w_tech", 5))
@@ -2027,8 +2006,12 @@ def _run_streamlit_ui():
                         type="primary",
                         help="Show why this ticker received its fundamental and technical scores.",
                     ):
-                        st.session_state["active_inspect_ticker"] = st.session_state.get("scr_select_tkr")
-                        st.rerun()
+                        sel_ticker = st.session_state.get("scr_select_tkr")
+                        match = df[df["Ticker"] == sel_ticker]
+                        if not match.empty:
+                            show_pillar_details_modal(match.iloc[0].to_dict())
+                        else:
+                            st.toast(f"No result data found for {sel_ticker}.")
                 st.dataframe(
                     display_table,
                     use_container_width=True,
@@ -2189,8 +2172,12 @@ def _run_streamlit_ui():
                     type="primary",
                     help="Show why this holding received its fundamental and technical scores.",
                 ):
-                    st.session_state["active_inspect_ticker"] = p_selected_ticker
-                    st.rerun()
+                    sel_ticker = st.session_state.get("port_select_tkr")
+                    match = p_results[p_results["Ticker"] == sel_ticker]
+                    if not match.empty:
+                        show_pillar_details_modal(match.iloc[0].to_dict())
+                    else:
+                        st.toast(f"No result data found for {sel_ticker}.")
             st.dataframe(
                 p_table,
                 use_container_width=True,
@@ -2370,19 +2357,24 @@ def _run_streamlit_ui():
         st.markdown("**Pillar weights (sum to 10)**")
         
         def update_w_fund():
-            st.session_state["w_tech"] = 10 - st.session_state["w_fund"]
+            val = st.session_state.slider_w_fund
+            st.session_state["w_fund"] = val
+            st.session_state["w_tech"] = 10 - val
             save_user_settings_to_db()
             _persist_digest_pref()
 
         def update_w_tech():
-            st.session_state["w_fund"] = 10 - st.session_state["w_tech"]
+            val = st.session_state.slider_w_tech
+            st.session_state["w_tech"] = val
+            st.session_state["w_fund"] = 10 - val
             save_user_settings_to_db()
             _persist_digest_pref()
         
         st.slider(
             "Fundamental Weight",
             0, 10,
-            key="w_fund",
+            value=int(st.session_state.get("w_fund", 5)),
+            key="slider_w_fund",
             on_change=update_w_fund,
             help="Share of Total from the CANSLIM score. Technical is set to 10 minus this.",
         )
@@ -2390,7 +2382,8 @@ def _run_streamlit_ui():
         st.slider(
             "Technical Weight",
             0, 10,
-            key="w_tech",
+            value=int(st.session_state.get("w_tech", 5)),
+            key="slider_w_tech",
             on_change=update_w_tech,
             help="Share of Total from the 10-point technical score. Fundamental is set to 10 minus this.",
         )
