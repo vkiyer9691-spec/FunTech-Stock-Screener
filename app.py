@@ -131,6 +131,15 @@ NSE_INDEX_FILES = {
 }
 UNIVERSE_SOURCE_OPTIONS = list(NSE_INDEX_FILES.keys()) + ["F&O Stocks"]
 
+AVAILABLE_SETUPS = [
+    "Pullback (DW)",
+    "Pullback (WM)",
+    "Breakout Retest",
+    "RSI Resumption",
+    "Vol Squeeze",
+    "20-EMA Bounce",
+]
+
 DEFAULT_FUND_PARAMS = {
     "C": "C: Quarterly EPS vs same quarter last year > 15%",
     "A": "A: Quarterly Total Revenue vs same quarter last year > 10%",
@@ -628,6 +637,8 @@ def init_session_defaults():
         st.session_state["digest_top_n"] = 10
     if "su_universes" not in st.session_state:
         st.session_state["su_universes"] = ["Nifty 50"]
+    if "su_setups" not in st.session_state:
+        st.session_state["su_setups"] = AVAILABLE_SETUPS.copy()
 
 def load_user_settings_from_db(user_id: str):
     supabase = get_supabase_client()
@@ -659,6 +670,8 @@ def load_user_settings_from_db(user_id: str):
                 st.session_state["digest_top_n"] = int(data.get("digest_top_n"))
             if "setup_universes" in data and isinstance(data["setup_universes"], list):
                 st.session_state["su_universes"] = data["setup_universes"]
+            if "setup_patterns" in data and isinstance(data["setup_patterns"], list):
+                st.session_state["su_setups"] = data["setup_patterns"]
     except Exception as e:
         st.warning(f"Could not load saved settings: {e}")
 
@@ -685,15 +698,16 @@ def save_user_settings_to_db():
         "digest_opt_in": bool(st.session_state.get("digest_opt_in", False)),
         "digest_top_n": int(st.session_state.get("digest_top_n", 10)),
         "setup_universes": st.session_state.get("su_universes", ["Nifty 50"]),
+        "setup_patterns": st.session_state.get("su_setups", AVAILABLE_SETUPS),
         "updated_at": "now()"
     }
     try:
         supabase.table("user_settings").upsert(payload).execute()
     except Exception:
-        # Fallback if specific newer columns do not exist yet
         payload.pop("digest_opt_in", None)
         payload.pop("digest_top_n", None)
         payload.pop("setup_universes", None)
+        payload.pop("setup_patterns", None)
         try:
             supabase.table("user_settings").upsert(payload).execute()
         except Exception as e:
@@ -1252,9 +1266,11 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
     hist = macd_line - signal_line
     return pd.DataFrame({"MACD": macd_line, "MACDh": hist, "MACDs": signal_line})
 
-def check_stocks_setting_up(df):
+def check_stocks_setting_up(df, enabled_setups=None):
     if df is None or len(df) < 150:
         return []
+    if enabled_setups is None:
+        enabled_setups = AVAILABLE_SETUPS
         
     try:
         stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=14, d=3, smooth_k=3)
@@ -1280,149 +1296,139 @@ def check_stocks_setting_up(df):
         weekly['RSI_W'] = compute_rsi(weekly['Close'], 14)
 
     # SETUP 1: Multi-Timeframe Pullback (DW & WM variants)
-    daily_cross_below_60 = False
-    if len(df) >= 5:
-        for i in range(1, 4):
-            curr_k = df['STOCH_K'].iloc[-i]
-            curr_d = df['STOCH_D'].iloc[-i]
-            prev_k = df['STOCH_K'].iloc[-(i+1)]
-            prev_d = df['STOCH_D'].iloc[-(i+1)]
-            if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
-                daily_cross_below_60 = True
-                break
-            
-    weekly_macd_up = False
-    if not weekly.empty and len(weekly) > 3:
-        macd_w = compute_macd(weekly['Close'])
-        if not macd_w.empty and len(macd_w) > 2:
-            weekly_macd_up = macd_w['MACD'].iloc[-1] > macd_w['MACD'].iloc[-2]
+    if "Pullback (DW)" in enabled_setups:
+        daily_cross_below_60 = False
+        if len(df) >= 5:
+            for i in range(1, 4):
+                curr_k = df['STOCH_K'].iloc[-i]
+                curr_d = df['STOCH_D'].iloc[-i]
+                prev_k = df['STOCH_K'].iloc[-(i+1)]
+                prev_d = df['STOCH_D'].iloc[-(i+1)]
+                if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
+                    daily_cross_below_60 = True
+                    break
+                
+        weekly_macd_up = False
+        if not weekly.empty and len(weekly) > 3:
+            macd_w = compute_macd(weekly['Close'])
+            if not macd_w.empty and len(macd_w) > 2:
+                weekly_macd_up = macd_w['MACD'].iloc[-1] > macd_w['MACD'].iloc[-2]
 
-    if daily_cross_below_60 and weekly_macd_up:
-        tags.append("✔️ Pullback (DW)")
+        if daily_cross_below_60 and weekly_macd_up:
+            tags.append("✔️ Pullback (DW)")
 
     # WM Logic (Weekly Stoch / Monthly MACD)
-    weekly_cross_below_60 = False
-    if not weekly.empty and len(weekly) >= 20:
-        try:
-            stoch_w = ta.stoch(weekly['High'], weekly['Low'], weekly['Close'], k=14, d=3, smooth_k=3)
-            weekly['STOCH_K'] = stoch_w['STOCHk_14_3_3']
-            weekly['STOCH_D'] = stoch_w['STOCHd_14_3_3']
-            for i in range(1, 3):
-                if i < len(weekly) - 1:
-                    curr_k = weekly['STOCH_K'].iloc[-i]
-                    curr_d = weekly['STOCH_D'].iloc[-i]
-                    prev_k = weekly['STOCH_K'].iloc[-(i+1)]
-                    prev_d = weekly['STOCH_D'].iloc[-(i+1)]
-                    if pd.notna(curr_k) and pd.notna(prev_k):
-                        if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
-                            weekly_cross_below_60 = True
-                            break
-        except Exception:
-            pass
+    if "Pullback (WM)" in enabled_setups:
+        weekly_cross_below_60 = False
+        if not weekly.empty and len(weekly) >= 20:
+            try:
+                stoch_w = ta.stoch(weekly['High'], weekly['Low'], weekly['Close'], k=14, d=3, smooth_k=3)
+                weekly['STOCH_K'] = stoch_w['STOCHk_14_3_3']
+                weekly['STOCH_D'] = stoch_w['STOCHd_14_3_3']
+                for i in range(1, 3):
+                    if i < len(weekly) - 1:
+                        curr_k = weekly['STOCH_K'].iloc[-i]
+                        curr_d = weekly['STOCH_D'].iloc[-i]
+                        prev_k = weekly['STOCH_K'].iloc[-(i+1)]
+                        prev_d = weekly['STOCH_D'].iloc[-(i+1)]
+                        if pd.notna(curr_k) and pd.notna(prev_k):
+                            if (prev_k < prev_d) and (curr_k > curr_d) and (curr_k < 60) and (curr_d < 60):
+                                weekly_cross_below_60 = True
+                                break
+            except Exception:
+                pass
 
-    monthly_macd_up = False
-    if not monthly.empty and len(monthly) > 3:
-        macd_m = compute_macd(monthly['Close'])
-        if not macd_m.empty and len(macd_m) > 2:
-            monthly_macd_up = macd_m['MACD'].iloc[-1] > macd_m['MACD'].iloc[-2]
+        monthly_macd_up = False
+        if not monthly.empty and len(monthly) > 3:
+            macd_m = compute_macd(monthly['Close'])
+            if not macd_m.empty and len(macd_m) > 2:
+                monthly_macd_up = macd_m['MACD'].iloc[-1] > macd_m['MACD'].iloc[-2]
 
-    if weekly_cross_below_60 and monthly_macd_up:
-        tags.append("✔️ Pullback (WM)")
+        if weekly_cross_below_60 and monthly_macd_up:
+            tags.append("✔️ Pullback (WM)")
 
     # SETUP 2: Breakout Retest
-    lookback = 40
-    resistance = df['High'].iloc[-lookback-5:-5].max() 
-    recent_breakout = df.iloc[-5:]['Close'].max() > resistance
-    resting_near_res = (resistance * 0.97) <= today['Close'] <= (resistance * 1.03)
-    quiet_volume = today['Volume'] < today['Vol_20_SMA']
-    if recent_breakout and resting_near_res and quiet_volume:
-        tags.append("✔️ Breakout Retest")
+    if "Breakout Retest" in enabled_setups:
+        lookback = 40
+        resistance = df['High'].iloc[-lookback-5:-5].max() 
+        recent_breakout = df.iloc[-5:]['Close'].max() > resistance
+        resting_near_res = (resistance * 0.97) <= today['Close'] <= (resistance * 1.03)
+        quiet_volume = today['Volume'] < today['Vol_20_SMA']
+        if recent_breakout and resting_near_res and quiet_volume:
+            tags.append("✔️ Breakout Retest")
 
     # SETUP 3: RSI Momentum Resumption
-    rsi_hit_high = df['RSI'].iloc[-20:-5].max() >= 60
-    rsi_cooled = df['RSI'].iloc[-5:-1].min() < 55
-    rsi_curling_up = yest['RSI'] < 55 and today['RSI'] >= 55
-    price_confirming = today['Close'] > yest['Close']
-    if rsi_hit_high and rsi_cooled and rsi_curling_up and price_confirming:
-        tags.append("✔️ RSI Resumption")
+    if "RSI Resumption" in enabled_setups:
+        rsi_hit_high = df['RSI'].iloc[-20:-5].max() >= 60
+        rsi_cooled = df['RSI'].iloc[-5:-1].min() < 55
+        rsi_curling_up = yest['RSI'] < 55 and today['RSI'] >= 55
+        price_confirming = today['Close'] > yest['Close']
+        if rsi_hit_high and rsi_cooled and rsi_curling_up and price_confirming:
+            tags.append("✔️ RSI Resumption")
 
     # SETUP 4: Volatility Squeeze
-    inside_day_1 = (yest['High'] < df.iloc[-3]['High']) and (yest['Low'] > df.iloc[-3]['Low'])
-    inside_day_2 = (today['High'] < yest['High']) and (today['Low'] > yest['Low'])
-    vol_dry_up = today['Volume'] < (today['Vol_20_SMA'] * 0.6)
-    if inside_day_1 and inside_day_2 and vol_dry_up:
-        tags.append("✔️ Vol Squeeze")
+    if "Vol Squeeze" in enabled_setups:
+        inside_day_1 = (yest['High'] < df.iloc[-3]['High']) and (yest['Low'] > df.iloc[-3]['Low'])
+        inside_day_2 = (today['High'] < yest['High']) and (today['Low'] > yest['Low'])
+        vol_dry_up = today['Volume'] < (today['Vol_20_SMA'] * 0.6)
+        if inside_day_1 and inside_day_2 and vol_dry_up:
+            tags.append("✔️ Vol Squeeze")
 
     # SETUP 5: 20-EMA Trend Bounce
-    strong_trend = today['EMA_20'] > today['SMA_50']
-    touched_ema = today['Low'] <= today['EMA_20'] and today['Close'] > today['EMA_20']
-    daily_range = today['High'] - today['Low']
-    closed_strong = today['Close'] > (today['Low'] + (daily_range * 0.5))
-    if strong_trend and touched_ema and closed_strong:
-        tags.append("✔️ 20-EMA Bounce")
+    if "20-EMA Bounce" in enabled_setups:
+        strong_trend = today['EMA_20'] > today['SMA_50']
+        touched_ema = today['Low'] <= today['EMA_20'] and today['Close'] > today['EMA_20']
+        daily_range = today['High'] - today['Low']
+        closed_strong = today['Close'] > (today['Low'] + (daily_range * 0.5))
+        if strong_trend and touched_ema and closed_strong:
+            tags.append("✔️ 20-EMA Bounce")
 
     # --- TEMPORARILY COMMENTED OUT FOR REFINEMENT ---
     # # SETUP 6: Bottom Fisher (Strict Geometric Reversal)
-    # try:
-    #     macro_window = df.iloc[-120:-10]
-    #     idx_L0 = macro_window['Low'].idxmin()
-    #     price_L0 = df.loc[idx_L0, 'Low']
-    #     
-    #     max_high_recent = df['High'].tail(150).max()
-    #     
-    #     # Geometry 1: Ensure it's a true drawdown (>= 15% drop from peak)
-    #     if price_L0 <= max_high_recent * 0.85:
-    #         if idx_L0 < df.index[-3]:
-    #             thrust_window = df.loc[idx_L0:df.index[-3]]
-    #             idx_H1 = thrust_window['High'].idxmax()
-    #             price_H1 = df.loc[idx_H1, 'High']
-    #             
-    #             # Geometry 2: Thrust must be at least 5% from the bottom
-    #             if price_H1 >= price_L0 * 1.05:
-    #                 max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
-    #                 
-    #                 if max_rsi_thrust >= 60:
-    #                     pullback_window = df.loc[idx_H1:]
-    #                     idx_L1 = pullback_window['Low'].idxmin()
-    #                     price_L1 = df.loc[idx_L1, 'Low']
-    #                     
-    #                     thrust_range = price_H1 - price_L0
-    #                     
-    #                     # Geometry 3: Pullback must retrace at least 25% of the thrust
-    #                     if price_L1 <= price_H1 - (thrust_range * 0.25):
-    #                         valid_pullback = False
-    #                         
-    #                         # Path A (Higher Low)
-    #                         if price_L1 > price_L0:
-    #                             rsi_L1 = df.loc[idx_L1, 'RSI']
-    #                             if 40 <= rsi_L1 <= 55:
-    #                                 valid_pullback = True
-    #                         # Path B (Lower Low -> Bullish Divergence on Weekly)
-    #                         else:
-    #                             if not weekly.empty and 'RSI_W' in weekly.columns:
-    #                                 week_L0_list = weekly.index[weekly.index >= idx_L0]
-    #                                 week_L1_list = weekly.index[weekly.index >= idx_L1]
-    #                                 if len(week_L0_list) > 0 and len(week_L1_list) > 0:
-    #                                     week_L0 = week_L0_list[0]
-    #                                     week_L1 = week_L1_list[0]
-    #                                     rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
-    #                                     rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
-    #                                     if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
-    #                                         valid_pullback = True
-    #
-    #                         if valid_pullback and idx_L1 < today.name:
-    #                             closes_since_L1 = df.loc[idx_L1:, 'Close']
-    #                             has_broken_out = closes_since_L1.max() > price_H1
-    #                             
-    #                             is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
-    #                             
-    #                             # Geometry 4: Strict Retest (Close cannot be deeper than 1% below H1 pivot)
-    #                             is_retesting = has_broken_out and (today['Close'] >= price_H1 * 0.99) and (today['Low'] <= price_H1 * 1.02)
-    #                             
-    #                             if is_breakout_today or is_retesting:
-    #                                 tags.append("✔️ Bottom Fisher")
-    # except Exception:
-    #     pass
+    # if "Bottom Fisher" in enabled_setups:
+    #     try:
+    #         macro_window = df.iloc[-120:-10]
+    #         idx_L0 = macro_window['Low'].idxmin()
+    #         price_L0 = df.loc[idx_L0, 'Low']
+    #         max_high_recent = df['High'].tail(150).max()
+    #         if price_L0 <= max_high_recent * 0.85:
+    #             if idx_L0 < df.index[-3]:
+    #                 thrust_window = df.loc[idx_L0:df.index[-3]]
+    #                 idx_H1 = thrust_window['High'].idxmax()
+    #                 price_H1 = df.loc[idx_H1, 'High']
+    #                 if price_H1 >= price_L0 * 1.05:
+    #                     max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
+    #                     if max_rsi_thrust >= 60:
+    #                         pullback_window = df.loc[idx_H1:]
+    #                         idx_L1 = pullback_window['Low'].idxmin()
+    #                         price_L1 = df.loc[idx_L1, 'Low']
+    #                         thrust_range = price_H1 - price_L0
+    #                         if price_L1 <= price_H1 - (thrust_range * 0.25):
+    #                             valid_pullback = False
+    #                             if price_L1 > price_L0:
+    #                                 rsi_L1 = df.loc[idx_L1, 'RSI']
+    #                                 if 40 <= rsi_L1 <= 55:
+    #                                     valid_pullback = True
+    #                             else:
+    #                                 if not weekly.empty and 'RSI_W' in weekly.columns:
+    #                                     week_L0_list = weekly.index[weekly.index >= idx_L0]
+    #                                     week_L1_list = weekly.index[weekly.index >= idx_L1]
+    #                                     if len(week_L0_list) > 0 and len(week_L1_list) > 0:
+    #                                         week_L0 = week_L0_list[0]
+    #                                         week_L1 = week_L1_list[0]
+    #                                         rsi_w_L0 = weekly.loc[week_L0, 'RSI_W']
+    #                                         rsi_w_L1 = weekly.loc[week_L1, 'RSI_W']
+    #                                         if pd.notna(rsi_w_L0) and pd.notna(rsi_w_L1) and rsi_w_L1 > rsi_w_L0:
+    #                                             valid_pullback = True
+    #                             if valid_pullback and idx_L1 < today.name:
+    #                                 closes_since_L1 = df.loc[idx_L1:, 'Close']
+    #                                 has_broken_out = closes_since_L1.max() > price_H1
+    #                                 is_breakout_today = (today['Close'] > price_H1) and (yest['Close'] <= price_H1)
+    #                                 is_retesting = has_broken_out and (today['Close'] >= price_H1 * 0.99) and (today['Low'] <= price_H1 * 1.02)
+    #                                 if is_breakout_today or is_retesting:
+    #                                     tags.append("✔️ Bottom Fisher")
+    #     except Exception:
+    #         pass
 
     return tags
 
@@ -2219,7 +2225,7 @@ def _run_streamlit_ui():
         st.caption("⚠️ **Disclaimer:** These are setups based exclusively on technical indicators. The user must do proper due diligence and risk assessment before committing money in the market.")
         st.divider()
         
-        st.markdown("Specify the universes, custom CSVs, or tickers you want to scan. We will rank them using your active Fundamental/Technical weights, take the **Top N**, and hunt for technical setups.")
+        st.markdown("Specify the universes, technical setups to hunt for, and custom lists. We will rank the stocks using your active Fundamental/Technical weights, take the **Top N**, and scan for your selected setups.")
         
         with st.form("su_form"):
             col_u1, col_u2 = st.columns([2, 1])
@@ -2242,6 +2248,18 @@ def _run_streamlit_ui():
                     help="We will rank the combined list and only look for setups in the top N."
                 )
             
+            su_setups_default = st.session_state.get("su_setups", AVAILABLE_SETUPS)
+            su_setups_default = [x for x in su_setups_default if x in AVAILABLE_SETUPS]
+            if not su_setups_default:
+                su_setups_default = AVAILABLE_SETUPS.copy()
+
+            selected_setups = st.multiselect(
+                "Select Technical Setups to Scan",
+                options=AVAILABLE_SETUPS,
+                default=su_setups_default,
+                help="Choose which setup conditions to evaluate. Tickers matching ANY of the selected setups will appear in results."
+            )
+
             with st.expander("📤 Upload Custom CSV/Excel List", expanded=False):
                 uploaded_csv_su = st.file_uploader(
                     "Upload Universe File",
@@ -2262,90 +2280,93 @@ def _run_streamlit_ui():
             btn_run_setups = st.form_submit_button("Run Scan", type="primary", use_container_width=True)
 
         if btn_run_setups:
-            
-            st.session_state["su_universes"] = selected_universes_su
-            save_user_settings_to_db()
-
-            csv_tickers_su = []
-            if uploaded_csv_su is not None:
-                try:
-                    if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
-                        csv_df_su = pd.read_excel(uploaded_csv_su)
-                    else:
-                        csv_df_su = pd.read_csv(uploaded_csv_su)
-                    csv_tickers_su = parse_broker_symbols(csv_df_su)
-                    if csv_tickers_su:
-                        st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
-                    else:
-                        st.error("Could not detect a symbol column in the uploaded file.")
-                except Exception as e:
-                    st.error(f"Error parsing universe file: {e}")
-
-            all_tickers_su = []
-            for univ in selected_universes_su:
-                if univ == "F&O Stocks":
-                    all_tickers_su.extend(load_fo_stocks())
-                else:
-                    all_tickers_su.extend(load_index_list(univ))
-            
-            custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
-            
-            all_tickers_su.extend(csv_tickers_su)
-            all_tickers_su.extend(custom_tickers_su)
-            all_tickers_su = list(set(all_tickers_su))
-            
-            if not all_tickers_su:
-                st.warning("No tickers found. Please select a universe, upload a CSV, or add custom tickers.")
+            if not selected_setups:
+                st.warning("Please select at least one technical setup to scan.")
             else:
-                if force_refresh_su:
-                    fetch_daily.clear()
-                    fetch_info.clear()
-                    
-                with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
-                    ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
-                
-                if ranked_df_su.empty:
-                    st.error("Could not retrieve price data to rank the selected stocks.")
-                else:
-                    top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
-                    top_tickers_list = top_ranked_df["Ticker"].tolist()
-                    
-                    st.write(f"Hunting for technical setups within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
-                    progress_bar = st.progress(0)
-                    setup_results = []
-                    
-                    for i, ticker in enumerate(top_tickers_list):
-                        df = fetch_daily(ticker)
-                        if df is not None and not df.empty:
-                            triggered_tags = check_stocks_setting_up(df)
-                            if triggered_tags:
-                                setup_results.append({
-                                    "Ticker": ticker.replace('.NS', ''),
-                                    "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
-                                    "LTP": round(df['Close'].iloc[-1], 2),
-                                    "Setups Triggered": " | ".join(triggered_tags)
-                                })
-                        progress_bar.progress((i + 1) / len(top_tickers_list))
-                        
-                    st.success("Setup Scan Complete!")
-                    
-                    if setup_results:
-                        results_df_su = pd.DataFrame(setup_results)
-                        
-                        st.divider()
-                        st.subheader("📈 TradingView 1-Click Clipboard Exporter")
-                        tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
-                        tv_content_su = ",".join(tv_symbols_su)
-                        
-                        st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
-                        if tv_symbols_su:
-                            st.code(tv_content_su, language="text")
-                            
-                        st.divider()
-                        st.subheader("📋 Stocks Setting Up")
-                        st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                st.session_state["su_universes"] = selected_universes_su
+                st.session_state["su_setups"] = selected_setups
+                save_user_settings_to_db()
+
+                csv_tickers_su = []
+                if uploaded_csv_su is not None:
+                    try:
+                        if uploaded_csv_su.name.lower().endswith((".xlsx", ".xls")):
+                            csv_df_su = pd.read_excel(uploaded_csv_su)
+                        else:
+                            csv_df_su = pd.read_csv(uploaded_csv_su)
+                        csv_tickers_su = parse_broker_symbols(csv_df_su)
+                        if csv_tickers_su:
+                            st.success(f"Loaded {len(csv_tickers_su)} tickers from file.")
+                        else:
+                            st.error("Could not detect a symbol column in the uploaded file.")
+                    except Exception as e:
+                        st.error(f"Error parsing universe file: {e}")
+
+                all_tickers_su = []
+                for univ in selected_universes_su:
+                    if univ == "F&O Stocks":
+                        all_tickers_su.extend(load_fo_stocks())
                     else:
-                        st.info(f"None of the Top {top_n_su} ranked stocks triggered a setup today. The market might be choppy or extended.")
+                        all_tickers_su.extend(load_index_list(univ))
+                
+                custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
+                
+                all_tickers_su.extend(csv_tickers_su)
+                all_tickers_su.extend(custom_tickers_su)
+                all_tickers_su = list(set(all_tickers_su))
+                
+                if not all_tickers_su:
+                    st.warning("No tickers found. Please select a universe, upload a CSV, or add custom tickers.")
+                else:
+                    if force_refresh_su:
+                        fetch_daily.clear()
+                        fetch_info.clear()
+                        
+                    with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
+                        ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
+                    
+                    if ranked_df_su.empty:
+                        st.error("Could not retrieve price data to rank the selected stocks.")
+                    else:
+                        top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
+                        top_tickers_list = top_ranked_df["Ticker"].tolist()
+                        
+                        st.write(f"Hunting for technical setups ({', '.join(selected_setups)}) within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
+                        progress_bar = st.progress(0)
+                        setup_results = []
+                        
+                        for i, ticker in enumerate(top_tickers_list):
+                            df = fetch_daily(ticker)
+                            if df is not None and not df.empty:
+                                triggered_tags = check_stocks_setting_up(df, enabled_setups=selected_setups)
+                                if triggered_tags:
+                                    setup_results.append({
+                                        "Ticker": ticker.replace('.NS', ''),
+                                        "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
+                                        "LTP": round(df['Close'].iloc[-1], 2),
+                                        "Setups Triggered": " | ".join(triggered_tags)
+                                    })
+                            progress_bar.progress((i + 1) / len(top_tickers_list))
+                            
+                        st.success("Setup Scan Complete!")
+                        
+                        if setup_results:
+                            results_df_su = pd.DataFrame(setup_results)
+                            
+                            st.divider()
+                            st.subheader("📈 TradingView 1-Click Clipboard Exporter")
+                            tv_symbols_su = [f"NSE:{s}" for s in results_df_su["Ticker"].tolist()]
+                            tv_content_su = ",".join(tv_symbols_su)
+                            
+                            st.write(f"**{len(tv_symbols_su)} matching tickers**. Copy below ➡️")
+                            if tv_symbols_su:
+                                st.code(tv_content_su, language="text")
+                                
+                            st.divider()
+                            st.subheader("📋 Stocks Setting Up")
+                            st.dataframe(results_df_su, use_container_width=True, hide_index=True)
+                        else:
+                            st.info(f"None of the Top {top_n_su} ranked stocks triggered your selected setup(s) today.")
 
     # ==================================================================================
     # TAB 4: USER GUIDE
