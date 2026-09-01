@@ -1233,12 +1233,12 @@ def show_setup_documentation_modal():
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
     
-    **6. Bottom Fisher (Institutional Exhaustion & Reversal)**
-    Detects macro trend reversals using a 4-phase institutional footprint sequence:
-    - **Phase 1 (The Flush):** Price must be at least 30% below its 52-week high, indicating a severe prior downtrend.
-    - **Phase 2 (The Footprint):** After hitting a local low ($L_0$), the stock must produce a sharp thrust upward that forces Daily RSI $\\ge$ 60 (proving institutional accumulation has arrested the fall).
-    - **Phase 3 (The Exhaustion Pullback):** The stock pulls back to form $L_1$ on strictly shrinking volume ($< 60\\%$ of its 20-day average), and crucially, the Daily RSI must remain $\\ge$ 40 on the day $L_1$ is printed, proving the momentum regime has successfully flipped to bullish.
-    - **Phase 4 (The Trigger):** The 20-day EMA must have flattened out or curled up, and the RSI must have pushed upward for two consecutive days since $L_1$ to confirm the pivot is holding.
+    **6. Bottom Fisher (Macro MACD & Daily Dow Reversal)**
+    Detects macro trend reversals using a hybrid Monthly/Daily sequence:
+    - **Phase 1 (The Bleed):** The Monthly MACD must show a prolonged 6-month decline leading up to the bottom (allows for 1 flat/up month tolerance out of the 6 intervals).
+    - **Phase 2 (The Curl):** The setup only triggers strictly in the **2nd or 3rd month** of the Monthly MACD sloping upward. It ignores the initial 1st month (too early/risky) and the 4th month onward (too late/extended).
+    - **Phase 3 (Daily Dow Reversal):** On the daily chart over the last 120 days, the stock must form an absolute low ($L_0$), a reaction high ($H_1$), and a confirmed Higher Low ($L_1 > L_0$).
+    - **Phase 4 (The Trigger):** The daily Close breaks above the $H_1$ resistance pivot, confirmed by Daily RSI $\\ge$ 55, Daily MACD positive/rising, and above-average volume.
     
     **7. Pocket Pivot (Base Accumulation)**
     Identifies institutional buying inside a constructive base before a traditional resistance breakout occurs:
@@ -1409,51 +1409,66 @@ def check_stocks_setting_up(df, enabled_setups=None):
         if strong_trend and touched_ema and closed_strong:
             tags.append("✔️ 20-EMA Bounce")
 
-    # SETUP 6: Bottom Fisher (Phase 1-4 Institutional Exhaustion)
+    # SETUP 6: Bottom Fisher (Macro MACD & Daily Dow Reversal)
     if "Bottom Fisher" in enabled_setups:
         try:
-            # Phase 1: Macro Damage (30% drop from 52w High)
-            max_high_252 = df['High'].tail(252).max()
-            macro_window = df.iloc[-150:-5]
-            if not macro_window.empty:
-                idx_L0 = macro_window['Low'].idxmin()
-                price_L0 = df.loc[idx_L0, 'Low']
-                
-                if price_L0 <= max_high_252 * 0.70:
+            if not monthly.empty and len(monthly) >= 10:
+                macd_m = compute_macd(monthly['Close'])
+                if not macd_m.empty and len(macd_m) >= 10:
+                    mac = macd_m['MACD'].tolist()
+                    M = list(reversed(mac)) # M[0] = current month, M[1] = 1 month ago
                     
-                    # Phase 2: Change of Character (RSI >= 60 thrust)
-                    thrust_window = df.loc[idx_L0:df.index[-3]]
-                    if not thrust_window.empty and len(thrust_window) > 2:
-                        idx_H1 = thrust_window['High'].idxmax()
-                        max_rsi_thrust = df.loc[idx_L0:idx_H1, 'RSI'].max()
-                        
-                        if max_rsi_thrust >= 60:
-                            
-                            # Phase 3: Exhaustion Pullback (L1, RSI >= 40, Vol Dryup)
-                            pullback_window = df.loc[idx_H1:df.index[-2]]
-                            if not pullback_window.empty:
-                                idx_L1 = pullback_window['Low'].idxmin()
-                                price_L1 = df.loc[idx_L1, 'Low']
-                                rsi_L1 = df.loc[idx_L1, 'RSI']
-                                vol_L1 = df.loc[idx_L1, 'Volume']
-                                vol_sma_L1 = df.loc[idx_L1, 'Vol_20_SMA']
+                    is_2nd_month = False
+                    is_3rd_month = False
+                    
+                    # Scenario A: 2nd month of upswing (Bottomed at M[2])
+                    if M[0] > M[1] > M[2] and M[2] < M[3]:
+                        if M[2] < M[8]: # Net drop over 6 months
+                            drops = sum([1 for i in range(2, 8) if M[i] < M[i+1]])
+                            if drops >= 5:
+                                is_2nd_month = True
                                 
-                                if rsi_L1 >= 40 and vol_L1 < (vol_sma_L1 * 0.60):
+                    # Scenario B: 3rd month of upswing (Bottomed at M[3])
+                    if M[0] > M[1] > M[2] > M[3] and M[3] < M[4]:
+                        if M[3] < M[9]: # Net drop over 6 months
+                            drops = sum([1 for i in range(3, 9) if M[i] < M[i+1]])
+                            if drops >= 5:
+                                is_3rd_month = True
+                                
+                    if is_2nd_month or is_3rd_month:
+                        macro_window = df.iloc[-120:-2] # Exclude last 2 days for L0 to allow H1/L1 formation
+                        if not macro_window.empty:
+                            idx_L0 = macro_window['Low'].idxmin()
+                            price_L0 = df.loc[idx_L0, 'Low']
+                            
+                            post_L0_window = df.loc[idx_L0:df.index[-2]]
+                            if len(post_L0_window) >= 3:
+                                idx_H1 = post_L0_window['High'].idxmax()
+                                price_H1 = df.loc[idx_H1, 'High']
+                                
+                                if idx_H1 > idx_L0:
+                                    post_H1_window = df.loc[idx_H1:]
+                                    idx_L1 = post_H1_window['Low'].idxmin()
+                                    price_L1 = df.loc[idx_L1, 'Low']
                                     
-                                    # Phase 4: Trigger (RSI up 2 days, 20 EMA flattening)
-                                    loc_L1 = df.index.get_loc(idx_L1)
-                                    loc_today = len(df) - 1
-                                    
-                                    if loc_today - loc_L1 >= 2:
-                                        rsi_today = df['RSI'].iloc[-1]
-                                        rsi_yest = df['RSI'].iloc[-2]
-                                        rsi_prev = df['RSI'].iloc[-3]
-                                        
-                                        if rsi_today > rsi_yest > rsi_prev:
-                                            ema20_today = df['EMA_20'].iloc[-1]
-                                            ema20_prev = df['EMA_20'].iloc[-3]
-                                            if ema20_today >= ema20_prev:
-                                                tags.append("✔️ Bottom Fisher")
+                                    # L1 must be > L0 and occur after H1
+                                    if price_L1 > price_L0 and idx_L1 > idx_H1:
+                                        # Trigger condition: Breakout above H1 within last few bars
+                                        if today['Close'] > price_H1 and today['Close'] <= price_H1 * 1.05: # within 5% of pivot
+                                            
+                                            # Momentum check
+                                            daily_macd = compute_macd(df['Close'])
+                                            if not daily_macd.empty:
+                                                macd_line = daily_macd['MACD'].iloc[-1]
+                                                macd_sig = daily_macd['MACDs'].iloc[-1]
+                                                macd_prev = daily_macd['MACD'].iloc[-2]
+                                                
+                                                macd_ok = (macd_line > macd_sig) or (macd_line > macd_prev)
+                                                rsi_ok = today['RSI'] >= 55
+                                                vol_ok = today['Volume'] > today['Vol_20_SMA']
+                                                
+                                                if macd_ok and rsi_ok and vol_ok:
+                                                    tags.append("✔️ Bottom Fisher")
         except Exception:
             pass
 
