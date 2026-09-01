@@ -1233,12 +1233,11 @@ def show_setup_documentation_modal():
     **5. 20-EMA Trend Bounce**
     Stock is in a strong uptrend (20 EMA > 50 SMA), dips to touch the 20 EMA, and closes strongly in the upper half of its daily range showing institutional support.
     
-    **6. Bottom Fisher (Macro MACD Regime & Daily Dow Reversal)**
-    Detects macro trend reversals using a hybrid Monthly/Daily sequence:
-    - **Phase 1 (The Bleed):** The Monthly MACD line must have remained below its Signal line for at least 6 full months leading up to the bottom (capturing a true Stage 4 downtrend regime without being broken by minor 1-month blips).
-    - **Phase 2 (The Curl):** The setup triggers during the months where the MACD is continuously sloping upward from the bottom, **up until the month it crosses its signal line**. (It stops flagging once the MACD > Signal cross is fully established, marking the start of Stage 2).
-    - **Phase 3 (Daily Dow Reversal):** On the daily chart over the last 120 days, the stock must form an absolute low ($L_0$), a reaction high ($H_1$), and a confirmed Higher Low ($L_1 > L_0$).
-    - **Phase 4 (The Trigger):** The daily Close breaks above the $H_1$ resistance pivot, confirmed by Daily RSI $\\ge$ 55, Daily MACD positive/rising, and above-average volume.
+    **6. Bottom Fisher (Macro MACD Regime)**
+    Detects macro trend reversals purely on the Monthly timeframe:
+    - **Phase 1 (The Bleed):** The Monthly MACD line must have remained below its Signal line for at least 6 full months leading up to the bottom (capturing a true Stage 4 downtrend regime).
+    - **Phase 2 (The Curl):** The setup triggers during the months where the MACD is continuously sloping upward from the bottom, **up until the month it crosses its signal line**.
+    - *Note:* This is inherently a high-risk setup since it attempts to catch a falling knife before daily confirmation. It is highly recommended to wait for another technical setup (like a 20-EMA Bounce or Pocket Pivot) to trigger simultaneously before entry.
     
     **7. Pocket Pivot (Base Accumulation)**
     Identifies institutional buying inside a constructive base before a traditional resistance breakout occurs:
@@ -1409,12 +1408,12 @@ def check_stocks_setting_up(df, enabled_setups=None):
         if strong_trend and touched_ema and closed_strong:
             tags.append("✔️ 20-EMA Bounce")
 
-    # SETUP 6: Bottom Fisher (Macro MACD Regime & Daily Dow Reversal)
+    # SETUP 6: Bottom Fisher (Macro MACD Regime)
     if "Bottom Fisher" in enabled_setups:
         try:
-            if not monthly.empty and len(monthly) >= 12:
+            if not monthly.empty and len(monthly) >= 18:
                 macd_m = compute_macd(monthly['Close'])
-                if not macd_m.empty and len(macd_m) >= 10:
+                if not macd_m.empty and len(macd_m) >= 18:
                     mac = macd_m['MACD'].tolist()
                     sig = macd_m['MACDs'].tolist()
                     M = list(reversed(mac)) # M[0] = current month, M[1] = 1 month ago
@@ -1422,8 +1421,8 @@ def check_stocks_setting_up(df, enabled_setups=None):
                     
                     is_valid_macro_bottom = False
                     
-                    # Search up to 7 months back for the distinct MACD bottom
-                    for B in range(2, 8):
+                    # Search up to 12 months back for the MACD bottom to catch prolonged curls
+                    for B in range(2, 12):
                         # Ensure MACD has been consecutively rising since the bottom B
                         rising = True
                         for i in range(B):
@@ -1438,8 +1437,8 @@ def check_stocks_setting_up(df, enabled_setups=None):
                             continue
                             
                         # Phase 1: Macro Damage (Negative Crossover >= 6 months before B)
-                        # This implies MACD has been below the Signal line for at least 6 months leading up to B
-                        if B + 6 <= len(M):
+                        # This implies MACD was strictly below the Signal line for at least 6 months leading up to B
+                        if B + 5 < len(M):
                             valid_downtrend = True
                             for i in range(B, B+6):
                                 if M[i] > S[i]:
@@ -1447,45 +1446,14 @@ def check_stocks_setting_up(df, enabled_setups=None):
                                     break
                             
                             if valid_downtrend:
-                                # Ensure we have not already fully crossed the signal line in previous months
+                                # Pre-Stage 2 check: MACD was below Signal last month.
+                                # (This flags it continuously until the month after it finally crosses over)
                                 if M[1] <= S[1]:
                                     is_valid_macro_bottom = True
                                     break
                                 
                     if is_valid_macro_bottom:
-                        macro_window = df.iloc[-120:-2] # Exclude last 2 days for L0 to allow H1/L1 formation
-                        if not macro_window.empty:
-                            idx_L0 = macro_window['Low'].idxmin()
-                            price_L0 = df.loc[idx_L0, 'Low']
-                            
-                            post_L0_window = df.loc[idx_L0:df.index[-2]]
-                            if len(post_L0_window) >= 3:
-                                idx_H1 = post_L0_window['High'].idxmax()
-                                price_H1 = df.loc[idx_H1, 'High']
-                                
-                                if idx_H1 > idx_L0:
-                                    post_H1_window = df.loc[idx_H1:]
-                                    idx_L1 = post_H1_window['Low'].idxmin()
-                                    price_L1 = df.loc[idx_L1, 'Low']
-                                    
-                                    # L1 must be > L0 and occur after H1
-                                    if price_L1 > price_L0 and idx_L1 > idx_H1:
-                                        # Trigger condition: Breakout above H1 within last few bars
-                                        if today['Close'] > price_H1 and today['Close'] <= price_H1 * 1.05: # within 5% of pivot
-                                            
-                                            # Momentum check
-                                            daily_macd = compute_macd(df['Close'])
-                                            if not daily_macd.empty:
-                                                macd_line = daily_macd['MACD'].iloc[-1]
-                                                macd_sig = daily_macd['MACDs'].iloc[-1]
-                                                macd_prev = daily_macd['MACD'].iloc[-2]
-                                                
-                                                macd_ok = (macd_line > macd_sig) or (macd_line > macd_prev)
-                                                rsi_ok = today['RSI'] >= 55
-                                                vol_ok = today['Volume'] > today['Vol_20_SMA']
-                                                
-                                                if macd_ok and rsi_ok and vol_ok:
-                                                    tags.append("✔️ Bottom Fisher")
+                        tags.append("✔️ Bottom Fisher")
         except Exception:
             pass
 
