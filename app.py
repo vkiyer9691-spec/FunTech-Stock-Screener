@@ -172,7 +172,7 @@ FUND_HELP = {
     "L": "On: the stock’s ~3-month (63-day) return must beat Nifty 50. Off: vs-Nifty leadership is ignored.",
     "Ls": "On: the same 63-day return must beat the average of same-sector names in this scan. Skipped when sector is unknown. Off: vs-sector leadership is ignored.",
     "I": "On: Yahoo institutional ownership must be above 30% of shares outstanding (promoter-heavy names often fail). Off: ownership is ignored.",
-    "M": "On: Nifty 50 must be above its 200-day average. Every stock in the scan gets the same result. Off: market direction is ignored.",
+    "M": "On: Nifty 50 above its 200-day average. Every stock in the scan gets the same result. Off: market direction is ignored.",
 }
 TECH_HELP = {
     "T1": "On: close must be above the 200-DMA and within 5% of the 50-DMA. Off: this trend/mean-reversion check is skipped.",
@@ -2426,19 +2426,30 @@ def _run_streamlit_ui():
                         fetch_daily.clear()
                         fetch_info.clear()
                         
-                    with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
-                        ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
+                    top_tickers_list = []
+                    score_map = {}
                     
-                    if skipped_su:
-                        st.warning(f"⚠️ Yahoo Finance blocked or returned insufficient data (< 30 days) for {len(skipped_su)} tickers. They were skipped. Try running again to fetch the rest.")
-
-                    if ranked_df_su.empty:
-                        st.error("Could not retrieve price data to rank the selected stocks.")
+                    # Bypass Fundamental Ranking if Top N >= Total Tickers
+                    if top_n_su >= len(all_tickers_su):
+                        st.info(f"⚡ Top N ({top_n_su}) is ≥ Total Tickers ({len(all_tickers_su)}). Bypassing fundamental ranking to save time...")
+                        top_tickers_list = all_tickers_su
+                        score_map = {t: "N/A (Bypassed)" for t in all_tickers_su}
                     else:
-                        top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
-                        top_tickers_list = top_ranked_df["Ticker"].tolist()
+                        with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
+                            ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
                         
-                        st.write(f"Hunting for technical setups ({', '.join(selected_setups)}) within the **Top {len(top_tickers_list)}** highest-scoring stocks...")
+                        if skipped_su:
+                            st.warning(f"⚠️ Yahoo Finance blocked or returned insufficient data (< 30 days) for {len(skipped_su)} tickers. They were skipped. Try running again to fetch the rest.")
+
+                        if ranked_df_su.empty:
+                            st.error("Could not retrieve price data to rank the selected stocks.")
+                        else:
+                            top_ranked_df = ranked_df_su.sort_values("Total Score", ascending=False).head(top_n_su)
+                            top_tickers_list = top_ranked_df["Ticker"].tolist()
+                            score_map = {row["Ticker"]: row["Total Score"] for _, row in top_ranked_df.iterrows()}
+                    
+                    if top_tickers_list:
+                        st.write(f"Hunting for technical setups ({', '.join(selected_setups)}) within **{len(top_tickers_list)}** stocks...")
                         progress_bar = st.progress(0)
                         setup_results = []
                         
@@ -2449,7 +2460,7 @@ def _run_streamlit_ui():
                                 if triggered_tags:
                                     setup_results.append({
                                         "Ticker": ticker.replace('.NS', ''),
-                                        "Total Score": top_ranked_df[top_ranked_df["Ticker"] == ticker]["Total Score"].iloc[0],
+                                        "Total Score": score_map.get(ticker, "N/A"),
                                         "LTP": round(df['Close'].iloc[-1], 2),
                                         "Setups Triggered": " | ".join(triggered_tags)
                                     })
@@ -2473,7 +2484,7 @@ def _run_streamlit_ui():
                             st.subheader("📋 Stocks Setting Up")
                             st.dataframe(results_df_su, use_container_width=True, hide_index=True)
                         else:
-                            st.info(f"None of the Top {top_n_su} ranked stocks triggered your selected setup(s) today.")
+                            st.info(f"None of the {len(top_tickers_list)} stocks triggered your selected setup(s) today.")
 
     # ==================================================================================
     # TAB 4: USER GUIDE
