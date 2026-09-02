@@ -2340,8 +2340,8 @@ def _run_streamlit_ui():
             with col_u2:
                 top_n_su = st.number_input(
                     "Top N Stocks to Scan for Setups", 
-                    min_value=1, max_value=1000, value=50, 
-                    help="We will rank the combined list and only look for setups in the top N."
+                    min_value=1, max_value=10000, value=50, 
+                    help="We will rank the combined list and only look for setups in the top N. To scan all stocks (ideal for Bottom Fishers), set this higher than your list size (e.g., 5000)."
                 )
             
             su_setups_default = st.session_state.get("su_setups", AVAILABLE_SETUPS)
