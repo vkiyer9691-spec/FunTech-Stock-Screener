@@ -1985,12 +1985,23 @@ def _run_streamlit_ui():
             key=f"scr_active_tickers::{univ_key_str}::{universe_state_tag}",
             help="Tickers that will be scored. Deselect names to skip them. Switching indices or uploading a file resets this list.",
         )
+        
         custom_raw = st.text_input(
             "Add Custom Tickers",
             value="",
             help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added if you omit it.",
         )
-        custom_tickers = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw.split(",") if t.strip()]
+        
+        # --- NEW AGGRESSIVE PARSER FOR SCREENER TAB ---
+        temp_str_main = custom_raw.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
+        raw_list_main = [s.strip().upper() for s in temp_str_main.split(",") if s.strip()]
+        custom_tickers = []
+        for sym in raw_list_main:
+            clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
+            if clean:
+                custom_tickers.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+        # ----------------------------------------------
+        
         watchlist_tickers = []
         universe = list(dict.fromkeys(selected_universe + custom_tickers + watchlist_tickers))
         
@@ -2394,7 +2405,15 @@ def _run_streamlit_ui():
                     else:
                         all_tickers_su.extend(load_index_list(univ))
                 
-                custom_tickers_su = [t.strip().upper() if t.strip().upper().endswith(".NS") else f"{t.strip().upper()}.NS" for t in custom_raw_su.split(",") if t.strip()]
+                # --- NEW AGGRESSIVE PARSER FOR SETUPS TAB ---
+                temp_str_su = custom_raw_su.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
+                raw_list_su = [s.strip().upper() for s in temp_str_su.split(",") if s.strip()]
+                custom_tickers_su = []
+                for sym in raw_list_su:
+                    clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
+                    if clean:
+                        custom_tickers_su.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+                # ----------------------------------------------
                 
                 all_tickers_su.extend(csv_tickers_su)
                 all_tickers_su.extend(custom_tickers_su)
