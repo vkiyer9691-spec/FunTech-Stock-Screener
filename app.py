@@ -492,12 +492,12 @@ def load_fo_stocks() -> list:
     return FALLBACK_FO_STOCKS
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
+def fetch_daily(ticker: str, period: str = "2y", retries: int = 3):
     for attempt in range(retries):
         try:
             df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
             if df is None or df.empty or len(df) < 30:
-                time.sleep(0.3)
+                time.sleep(0.5 + (attempt * 0.5))
                 continue
             required_cols = ["Open", "High", "Low", "Close", "Volume"]
             if not all(col in df.columns for col in required_cols):
@@ -508,7 +508,7 @@ def fetch_daily(ticker: str, period: str = "2y", retries: int = 2):
                 _get_freshness_tracker()["prices"] = pd.Timestamp.now()
                 return df
         except Exception:
-            time.sleep(0.3)
+            time.sleep(0.5 + (attempt * 0.5))
     return None
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1731,7 +1731,7 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     if _in_streamlit() and show_progress:
         progress = st.progress(0, text="Fetching stock data...")
         
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(fetch_single_stock, tkr): tkr for tkr in ticker_list}
         completed = 0
         for future in as_completed(futures):
@@ -2429,6 +2429,9 @@ def _run_streamlit_ui():
                     with st.spinner(f"Ranking all {len(all_tickers_su)} combined stocks to find the Top {top_n_su}..."):
                         ranked_df_su, skipped_su = execute_scan(all_tickers_su, w_fund, w_tech, show_progress=False)
                     
+                    if skipped_su:
+                        st.warning(f"⚠️ Yahoo Finance blocked or returned insufficient data (< 30 days) for {len(skipped_su)} tickers. They were skipped. Try running again to fetch the rest.")
+
                     if ranked_df_su.empty:
                         st.error("Could not retrieve price data to rank the selected stocks.")
                     else:
