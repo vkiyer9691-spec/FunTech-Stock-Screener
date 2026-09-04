@@ -1813,7 +1813,12 @@ def render_algo_manager():
     if session and hasattr(session, "access_token"):
         supabase.postgrest.auth(session.access_token)
 
-    tab_cfg, tab_port, tab_perf = st.tabs(["🎛️ Strategy Configurator", "📊 Live Portfolio", "📜 Performance Ledger"])
+    tab_cfg, tab_port, tab_perf, tab_broker = st.tabs([
+        "🎛️ Strategy Configurator", 
+        "📊 Live Portfolio", 
+        "📜 Performance Ledger", 
+        "🔌 Broker Connections"
+    ])
     
     # ------------------------------------------------------------------------------
     # ALGO TAB 1: STRATEGY CONFIGURATOR
@@ -1867,7 +1872,6 @@ def render_algo_manager():
             st.divider()
             st.markdown("##### Target Universe Configuration")
             
-            # Identify if the existing DB config was using a standard index or a custom list
             standard_defaults = [u for u in db_universe_arr if u in UNIVERSE_SOURCE_OPTIONS]
             if not standard_defaults:
                 standard_defaults = ["Nifty 500"]
@@ -1888,7 +1892,6 @@ def render_algo_manager():
                     help="Upload a broker export or custom list to restrict the Algo strictly to these names."
                 )
             
-            # Show previously saved custom tickers in the text box so they aren't lost
             custom_defaults = [u.replace(".NS", "") for u in db_universe_arr if u not in UNIVERSE_SOURCE_OPTIONS]
             custom_raw = st.text_input(
                 "Add Custom Tickers",
@@ -1898,7 +1901,6 @@ def render_algo_manager():
             )
             
             if st.button("💾 Save Pod Configuration", key="save_algo_pod_dw", type="primary", use_container_width=True):
-                # 1. Parse CSV if uploaded
                 csv_tickers = []
                 if uploaded_csv is not None:
                     try:
@@ -1910,7 +1912,6 @@ def render_algo_manager():
                     except Exception as e:
                         st.error(f"Error parsing uploaded file: {e}")
                 
-                # 2. Parse manual text input
                 temp_str = custom_raw.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
                 raw_list = [s.strip().upper() for s in temp_str.split(",") if s.strip()]
                 manual_tickers = []
@@ -1919,7 +1920,6 @@ def render_algo_manager():
                     if clean:
                         manual_tickers.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
                 
-                # 3. Combine indices, csv, and manual into the final array
                 final_universe_array = list(dict.fromkeys(selected_univ + csv_tickers + manual_tickers))
                 
                 if not final_universe_array:
@@ -2018,6 +2018,51 @@ def render_algo_manager():
                 use_container_width=True,
                 hide_index=True
             )
+
+    # ------------------------------------------------------------------------------
+    # ALGO TAB 4: BROKER CONNECTIONS
+    # ------------------------------------------------------------------------------
+    with tab_broker:
+        st.markdown("#### Broker API Configuration (Angel One)")
+        st.caption("Angel One is used for background execution because SmartAPI supports 100% automated TOTP generation via Python, whereas Zerodha requires a manual daily web login.")
+        
+        existing_broker = {}
+        try:
+            broker_res = supabase.table("broker_credentials").select("*").eq("user_id", user_id).execute()
+            if broker_res.data:
+                existing_broker = broker_res.data[0]
+        except Exception:
+            pass
+            
+        with st.form("broker_config_form"):
+            api_key = st.text_input("SmartAPI Key", value=existing_broker.get("api_key", ""), type="password")
+            client_code = st.text_input("Client Code", value=existing_broker.get("client_code", ""))
+            pin = st.text_input("Account PIN", value=existing_broker.get("pin", ""), type="password")
+            totp_secret = st.text_input(
+                "TOTP Secret (Base32 Auth String)", 
+                value=existing_broker.get("totp_secret", ""), 
+                type="password", 
+                help="The long string of letters provided by Angel One when you first enable TOTP. Do not enter the 6-digit pin here."
+            )
+            
+            if st.form_submit_button("💾 Securely Save Credentials", type="primary", use_container_width=True):
+                if not (api_key and client_code and pin and totp_secret):
+                    st.warning("All fields are required to establish an automated session.")
+                else:
+                    payload = {
+                        "user_id": user_id,
+                        "broker": "AngelOne",
+                        "api_key": api_key,
+                        "client_code": client_code,
+                        "pin": pin,
+                        "totp_secret": totp_secret,
+                        "updated_at": "now()"
+                    }
+                    try:
+                        supabase.table("broker_credentials").upsert(payload, on_conflict="user_id").execute()
+                        st.success("✅ Broker credentials securely locked in Supabase vault.")
+                    except Exception as e:
+                        st.error(f"Error saving credentials: {e}")
 
 # ----------------------------------------------------------------------------------
 # Main UI App Loop
