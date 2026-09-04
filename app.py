@@ -1813,12 +1813,7 @@ def render_algo_manager():
     if session and hasattr(session, "access_token"):
         supabase.postgrest.auth(session.access_token)
 
-    tab_cfg, tab_port, tab_perf, tab_broker = st.tabs([
-        "🎛️ Strategy Configurator", 
-        "📊 Live Portfolio", 
-        "📜 Performance Ledger", 
-        "🔌 Broker Connections"
-    ])
+    tab_cfg, tab_port, tab_perf = st.tabs(["🎛️ Strategy Configurator", "📊 Live Portfolio", "📜 Performance Ledger"])
     
     # ------------------------------------------------------------------------------
     # ALGO TAB 1: STRATEGY CONFIGURATOR
@@ -2018,51 +2013,6 @@ def render_algo_manager():
                 use_container_width=True,
                 hide_index=True
             )
-
-    # ------------------------------------------------------------------------------
-    # ALGO TAB 4: BROKER CONNECTIONS
-    # ------------------------------------------------------------------------------
-    with tab_broker:
-        st.markdown("#### Broker API Configuration (Angel One)")
-        st.caption("Angel One is used for background execution because SmartAPI supports 100% automated TOTP generation via Python, whereas Zerodha requires a manual daily web login.")
-        
-        existing_broker = {}
-        try:
-            broker_res = supabase.table("broker_credentials").select("*").eq("user_id", user_id).execute()
-            if broker_res.data:
-                existing_broker = broker_res.data[0]
-        except Exception:
-            pass
-            
-        with st.form("broker_config_form"):
-            api_key = st.text_input("SmartAPI Key", value=existing_broker.get("api_key", ""), type="password")
-            client_code = st.text_input("Client Code", value=existing_broker.get("client_code", ""))
-            pin = st.text_input("Account PIN", value=existing_broker.get("pin", ""), type="password")
-            totp_secret = st.text_input(
-                "TOTP Secret (Base32 Auth String)", 
-                value=existing_broker.get("totp_secret", ""), 
-                type="password", 
-                help="The long string of letters provided by Angel One when you first enable TOTP. Do not enter the 6-digit pin here."
-            )
-            
-            if st.form_submit_button("💾 Securely Save Credentials", type="primary", use_container_width=True):
-                if not (api_key and client_code and pin and totp_secret):
-                    st.warning("All fields are required to establish an automated session.")
-                else:
-                    payload = {
-                        "user_id": user_id,
-                        "broker": "AngelOne",
-                        "api_key": api_key,
-                        "client_code": client_code,
-                        "pin": pin,
-                        "totp_secret": totp_secret,
-                        "updated_at": "now()"
-                    }
-                    try:
-                        supabase.table("broker_credentials").upsert(payload, on_conflict="user_id").execute()
-                        st.success("✅ Broker credentials securely locked in Supabase vault.")
-                    except Exception as e:
-                        st.error(f"Error saving credentials: {e}")
 
 # ----------------------------------------------------------------------------------
 # Main UI App Loop
