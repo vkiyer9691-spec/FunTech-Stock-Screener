@@ -1836,9 +1836,6 @@ def render_algo_manager():
             default_slots = int(existing_config.get("max_slots", 10)) if existing_config else 10
             
             db_universe_arr = existing_config.get("custom_universe", ["Nifty 500"]) if existing_config else ["Nifty 500"]
-            default_universe = db_universe_arr[0] if db_universe_arr else "Nifty 500"
-            if default_universe not in UNIVERSE_SOURCE_OPTIONS:
-                default_universe = "Nifty 500"
 
             is_active = st.toggle("Activate Pullback (DW) Pod", value=default_active, key="algo_toggle_dw")
             
@@ -1867,29 +1864,81 @@ def render_algo_manager():
             per_trade_budget = allocated_cap / max_slots
             st.info(f"💡 **Calculated Per-Trade Budget:** ₹{per_trade_budget:,.2f} per position ({max_slots} maximum concurrent slots).")
             
-            universe_idx = UNIVERSE_SOURCE_OPTIONS.index(default_universe) if default_universe in UNIVERSE_SOURCE_OPTIONS else 0
-            selected_univ = st.selectbox(
-                "Scan Universe for Pod", 
-                options=UNIVERSE_SOURCE_OPTIONS, 
-                index=universe_idx, 
+            st.divider()
+            st.markdown("##### Target Universe Configuration")
+            
+            # Identify if the existing DB config was using a standard index or a custom list
+            standard_defaults = [u for u in db_universe_arr if u in UNIVERSE_SOURCE_OPTIONS]
+            if not standard_defaults:
+                standard_defaults = ["Nifty 500"]
+
+            selected_univ = st.multiselect(
+                "Scan Universe (Standard Indices)", 
+                options=UNIVERSE_SOURCE_OPTIONS,
+                default=standard_defaults,
                 key="algo_univ_dw"
             )
             
+            with st.expander("📤 Upload Custom CSV/Excel Watchlist", expanded=False):
+                uploaded_csv = st.file_uploader(
+                    "Upload Custom Watchlist",
+                    type=["csv", "xlsx", "xls"],
+                    key="algo_csv_dw",
+                    label_visibility="collapsed",
+                    help="Upload a broker export or custom list to restrict the Algo strictly to these names."
+                )
+            
+            # Show previously saved custom tickers in the text box so they aren't lost
+            custom_defaults = [u.replace(".NS", "") for u in db_universe_arr if u not in UNIVERSE_SOURCE_OPTIONS]
+            custom_raw = st.text_input(
+                "Add Custom Tickers",
+                value=", ".join(custom_defaults),
+                key="algo_custom_dw",
+                help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added automatically."
+            )
+            
             if st.button("💾 Save Pod Configuration", key="save_algo_pod_dw", type="primary", use_container_width=True):
-                payload = {
-                    "user_id": user_id,
-                    "setup_name": "Pullback (DW)",
-                    "is_active": is_active,
-                    "allocated_capital": allocated_cap,
-                    "max_slots": max_slots,
-                    "custom_universe": [selected_univ],
-                    "updated_at": "now()"
-                }
-                try:
-                    supabase.table("algo_setup_configs").upsert(payload, on_conflict="user_id, setup_name").execute()
-                    st.success("✅ Pod configuration saved successfully! Engine will query this on the next scheduled heartbeat.")
-                except Exception as err:
-                    st.error(f"Failed to update algo configuration: {err}")
+                # 1. Parse CSV if uploaded
+                csv_tickers = []
+                if uploaded_csv is not None:
+                    try:
+                        if uploaded_csv.name.lower().endswith((".xlsx", ".xls")):
+                            csv_df = pd.read_excel(uploaded_csv)
+                        else:
+                            csv_df = pd.read_csv(uploaded_csv)
+                        csv_tickers = parse_broker_symbols(csv_df)
+                    except Exception as e:
+                        st.error(f"Error parsing uploaded file: {e}")
+                
+                # 2. Parse manual text input
+                temp_str = custom_raw.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
+                raw_list = [s.strip().upper() for s in temp_str.split(",") if s.strip()]
+                manual_tickers = []
+                for sym in raw_list:
+                    clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
+                    if clean:
+                        manual_tickers.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+                
+                # 3. Combine indices, csv, and manual into the final array
+                final_universe_array = list(dict.fromkeys(selected_univ + csv_tickers + manual_tickers))
+                
+                if not final_universe_array:
+                    st.warning("You must select at least one index or provide custom tickers.")
+                else:
+                    payload = {
+                        "user_id": user_id,
+                        "setup_name": "Pullback (DW)",
+                        "is_active": is_active,
+                        "allocated_capital": allocated_cap,
+                        "max_slots": max_slots,
+                        "custom_universe": final_universe_array,
+                        "updated_at": "now()"
+                    }
+                    try:
+                        supabase.table("algo_setup_configs").upsert(payload, on_conflict="user_id, setup_name").execute()
+                        st.success(f"✅ Pod configuration saved! Engine will scan {len(final_universe_array)} selected universes/tickers on the next heartbeat.")
+                    except Exception as err:
+                        st.error(f"Failed to update algo configuration: {err}")
 
     # ------------------------------------------------------------------------------
     # ALGO TAB 2: LIVE PORTFOLIO
@@ -1905,7 +1954,6 @@ def render_algo_manager():
         except Exception as e:
             st.error(f"Could not load paper trades: {e}")
 
-        # Summary Metrics Row
         total_allocated = 0
         try:
             cfgs_all = supabase.table("algo_setup_configs").select("allocated_capital, is_active").eq("user_id", user_id).execute()
