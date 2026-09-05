@@ -3,7 +3,7 @@ NSE Stock Screener — Interactive Analysis Engine (Auth Gated, Admin Enabled & 
 ----------------------------------------------------------------------------------
 Includes Enforced Main-Screen Supabase Authentication, Settings Persistence (Save/Load),
 Dynamic Database-Driven Admin Privilege Checking, Multi-Broker Auto-Parser, 
-Parallel Execution Engine, 1-Click TradingView Exporter, and Algo Fund Manager.
+Parallel Execution Engine, and 1-Click TradingView Exporter.
 Run with: streamlit run app.py
 """
 import os
@@ -581,6 +581,7 @@ def get_supabase_admin_client():
     if not SUPABASE_AVAILABLE:
         return None
     url = _cfg("SUPABASE_URL", "supabase", "url")
+    # Tries to use the Service Role Key to bypass RLS in the Admin Panel
     key = _cfg("SUPABASE_SERVICE_KEY", "supabase", "service_key") or _cfg("SUPABASE_SERVICE_ROLE_KEY", "supabase", "service_role_key")
     if url and key and url != "None" and key != "None":
         try:
@@ -638,31 +639,6 @@ def is_authorized_or_admin(user) -> bool:
         if res.data and len(res.data) > 0:
             role = str(res.data[0].get("role")).lower().strip()
             return role in ["admin", "authorized"]
-    except Exception:
-        pass
-    return False
-
-def is_algo_authorized(user) -> bool:
-    """Check if the user has permission to manage automated algo pods."""
-    if not user:
-        return False
-    email = user.get("email") if isinstance(user, dict) else getattr(user, "email", "")
-    if email.lower() == "vkiyer@hotmail.com":
-        return True
-    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
-    if not user_id:
-        return False
-    supabase = get_supabase_client()
-    if not supabase:
-        return False
-    try:
-        session = st.session_state.get("supabase_session")
-        if session and hasattr(session, "access_token"):
-            supabase.postgrest.auth(session.access_token)
-        res = supabase.table("profiles").select("role").eq("id", user_id).execute()
-        if res.data and len(res.data) > 0:
-            role = str(res.data[0].get("role")).lower().strip()
-            return role in ["admin", "algo"]
     except Exception:
         pass
     return False
@@ -1266,7 +1242,7 @@ def show_setup_documentation_modal():
     **7. Pocket Pivot (Base Accumulation)**
     Identifies institutional buying inside a constructive base before a traditional resistance breakout occurs:
     - **Context:** The stock is trading above its 200-DMA, and its 50-DMA is flattening or sloping upward.
-    - **Support Interaction:** The low of the day must drop within 1.5% of either the 10-EMA or the 50-SMA (a "kiss" of support) and close firmly in the upper 40% of its daily range.
+    - **Support Interaction:** The low of the day must drop within $1.5\\%$ of either the 10-EMA or the 50-SMA (a "kiss" of support) and close firmly in the upper $40\\%$ of its daily range.
     - **Volume Signature:** It must be an "Up" day (Close > Yesterday Close) with trading volume strictly higher than the largest "Down" day volume seen over the previous 10 trading sessions.
     """)
 
@@ -1440,12 +1416,14 @@ def check_stocks_setting_up(df, enabled_setups=None):
                 if not macd_m.empty and len(macd_m) >= 18:
                     mac = macd_m['MACD'].tolist()
                     sig = macd_m['MACDs'].tolist()
-                    M = list(reversed(mac))
+                    M = list(reversed(mac)) # M[0] = current month, M[1] = 1 month ago
                     S = list(reversed(sig))
                     
                     is_valid_macro_bottom = False
                     
+                    # Search up to 12 months back for the MACD bottom to catch prolonged curls
                     for B in range(2, 12):
+                        # Ensure MACD has been consecutively rising since the bottom B
                         rising = True
                         for i in range(B):
                             if M[i] <= M[i+1]:
@@ -1454,9 +1432,12 @@ def check_stocks_setting_up(df, enabled_setups=None):
                         if not rising:
                             continue
                             
+                        # Verify B is a distinct bottom
                         if M[B] >= M[B+1]:
                             continue
                             
+                        # Phase 1: Macro Damage (Negative Crossover >= 6 months before B)
+                        # This implies MACD was strictly below the Signal line for at least 6 months leading up to B
                         if B + 5 < len(M):
                             valid_downtrend = True
                             for i in range(B, B+6):
@@ -1465,6 +1446,8 @@ def check_stocks_setting_up(df, enabled_setups=None):
                                     break
                             
                             if valid_downtrend:
+                                # Pre-Stage 2 check: MACD was below Signal last month.
+                                # (This flags it continuously until the month after it finally crosses over)
                                 if M[1] <= S[1]:
                                     is_valid_macro_bottom = True
                                     break
@@ -1481,10 +1464,12 @@ def check_stocks_setting_up(df, enabled_setups=None):
             sma50 = df['SMA_50'].iloc[-1]
             sma200 = df['SMA_200'].iloc[-1]
             
+            # Trend Context: Above 200-DMA, 50-DMA flattening/sloping up
             if pd.notna(sma200) and today['Close'] > sma200:
                 sma50_5d_ago = df['SMA_50'].iloc[-5]
                 if pd.notna(sma50_5d_ago) and sma50 >= sma50_5d_ago:
                     
+                    # Support Interaction: Low dips within 1.5% of 10-EMA or 50-SMA
                     low_dist_10 = abs(today['Low'] - ema10) / ema10 if pd.notna(ema10) else 99
                     low_dist_50 = abs(today['Low'] - sma50) / sma50 if pd.notna(sma50) else 99
                     
@@ -1492,10 +1477,12 @@ def check_stocks_setting_up(df, enabled_setups=None):
                         daily_range = today['High'] - today['Low']
                         if daily_range > 0:
                             close_pct = (today['Close'] - today['Low']) / daily_range
-                            if close_pct >= 0.60:
+                            if close_pct >= 0.60: # Close in upper 40% of range
                                 
+                                # Volume Signature: Up day, Vol > Max Down Vol in last 10 days
                                 if today['Close'] > yest['Close']:
                                     down_vols = []
+                                    # Look back exactly 10 sessions before today
                                     for i in range(-11, -1):
                                         if df['Close'].iloc[i] < df['Close'].iloc[i-1]:
                                             down_vols.append(df['Volume'].iloc[i])
@@ -1795,226 +1782,6 @@ def execute_scan(ticker_list, w_fund, w_tech, w_rs=None, show_progress=True):
     return pd.DataFrame(results), skipped
 
 # ----------------------------------------------------------------------------------
-# Algo Manager UI Engine
-# ----------------------------------------------------------------------------------
-
-def render_algo_manager():
-    st.subheader("🤖 Algo Fund Manager (Multi-Pod Simulation & Forward Testing)")
-    st.caption("Gated quantitatively driven execution cockpit. Manage setup capital partitions and live forward-testing states.")
-    
-    supabase = get_supabase_client()
-    user_id = _current_user_id()
-    
-    if not supabase or not user_id:
-        st.error("Supabase client is not connected or user session is missing. Unable to load algo manager.")
-        return
-
-    session = st.session_state.get("supabase_session")
-    if session and hasattr(session, "access_token"):
-        supabase.postgrest.auth(session.access_token)
-
-    tab_cfg, tab_port, tab_perf = st.tabs(["🎛️ Strategy Configurator", "📊 Live Portfolio", "📜 Performance Ledger"])
-    
-    # ------------------------------------------------------------------------------
-    # ALGO TAB 1: STRATEGY CONFIGURATOR
-    # ------------------------------------------------------------------------------
-    with tab_cfg:
-        st.markdown("#### Setup Allocation Matrix")
-        st.caption("Activate strategies and partition your capital into isolated pods. Each pod is managed independently.")
-        
-        with st.expander("Pod: Pullback (DW)", expanded=True):
-            existing_config = None
-            try:
-                cfg_res = supabase.table("algo_setup_configs").select("*").eq("user_id", user_id).eq("setup_name", "Pullback (DW)").execute()
-                if cfg_res.data:
-                    existing_config = cfg_res.data[0]
-            except Exception as e:
-                st.warning(f"Could not read existing configs: {e}")
-
-            default_active = bool(existing_config.get("is_active", False)) if existing_config else False
-            default_capital = int(existing_config.get("allocated_capital", 1000000)) if existing_config else 1000000
-            default_slots = int(existing_config.get("max_slots", 10)) if existing_config else 10
-            
-            db_universe_arr = existing_config.get("custom_universe", ["Nifty 500"]) if existing_config else ["Nifty 500"]
-
-            is_active = st.toggle("Activate Pullback (DW) Pod", value=default_active, key="algo_toggle_dw")
-            
-            col_cap1, col_cap2 = st.columns(2)
-            with col_cap1:
-                allocated_cap = st.number_input(
-                    "Allocated Capital (₹)", 
-                    min_value=50000, 
-                    max_value=100000000, 
-                    step=50000, 
-                    value=default_capital, 
-                    key="algo_cap_dw",
-                    help="Total portfolio budget dedicated strictly to this strategy pod."
-                )
-            with col_cap2:
-                max_slots = st.number_input(
-                    "Max Open Slots (Max 15)", 
-                    min_value=1, 
-                    max_value=15, 
-                    step=1, 
-                    value=min(default_slots, 15), 
-                    key="algo_slots_dw",
-                    help="Maximum concurrent open positions allowed for this setup."
-                )
-                
-            per_trade_budget = allocated_cap / max_slots
-            st.info(f"💡 **Calculated Per-Trade Budget:** ₹{per_trade_budget:,.2f} per position ({max_slots} maximum concurrent slots).")
-            
-            st.divider()
-            st.markdown("##### Target Universe Configuration")
-            
-            standard_defaults = [u for u in db_universe_arr if u in UNIVERSE_SOURCE_OPTIONS]
-            if not standard_defaults:
-                standard_defaults = ["Nifty 500"]
-
-            selected_univ = st.multiselect(
-                "Scan Universe (Standard Indices)", 
-                options=UNIVERSE_SOURCE_OPTIONS,
-                default=standard_defaults,
-                key="algo_univ_dw"
-            )
-            
-            with st.expander("📤 Upload Custom CSV/Excel Watchlist", expanded=False):
-                uploaded_csv = st.file_uploader(
-                    "Upload Custom Watchlist",
-                    type=["csv", "xlsx", "xls"],
-                    key="algo_csv_dw",
-                    label_visibility="collapsed",
-                    help="Upload a broker export or custom list to restrict the Algo strictly to these names."
-                )
-            
-            custom_defaults = [u.replace(".NS", "") for u in db_universe_arr if u not in UNIVERSE_SOURCE_OPTIONS]
-            custom_raw = st.text_input(
-                "Add Custom Tickers",
-                value=", ".join(custom_defaults),
-                key="algo_custom_dw",
-                help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added automatically."
-            )
-            
-            if st.button("💾 Save Pod Configuration", key="save_algo_pod_dw", type="primary", use_container_width=True):
-                csv_tickers = []
-                if uploaded_csv is not None:
-                    try:
-                        if uploaded_csv.name.lower().endswith((".xlsx", ".xls")):
-                            csv_df = pd.read_excel(uploaded_csv)
-                        else:
-                            csv_df = pd.read_csv(uploaded_csv)
-                        csv_tickers = parse_broker_symbols(csv_df)
-                    except Exception as e:
-                        st.error(f"Error parsing uploaded file: {e}")
-                
-                temp_str = custom_raw.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
-                raw_list = [s.strip().upper() for s in temp_str.split(",") if s.strip()]
-                manual_tickers = []
-                for sym in raw_list:
-                    clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
-                    if clean:
-                        manual_tickers.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
-                
-                final_universe_array = list(dict.fromkeys(selected_univ + csv_tickers + manual_tickers))
-                
-                if not final_universe_array:
-                    st.warning("You must select at least one index or provide custom tickers.")
-                else:
-                    payload = {
-                        "user_id": user_id,
-                        "setup_name": "Pullback (DW)",
-                        "is_active": is_active,
-                        "allocated_capital": allocated_cap,
-                        "max_slots": max_slots,
-                        "custom_universe": final_universe_array,
-                        "updated_at": "now()"
-                    }
-                    try:
-                        supabase.table("algo_setup_configs").upsert(payload, on_conflict="user_id, setup_name").execute()
-                        st.success(f"✅ Pod configuration saved! Engine will scan {len(final_universe_array)} selected universes/tickers on the next heartbeat.")
-                    except Exception as err:
-                        st.error(f"Failed to update algo configuration: {err}")
-
-    # ------------------------------------------------------------------------------
-    # ALGO TAB 2: LIVE PORTFOLIO
-    # ------------------------------------------------------------------------------
-    with tab_port:
-        st.markdown("#### Real-time Paper Trading Cockpit")
-        
-        active_trades_data = []
-        try:
-            trades_res = supabase.table("active_paper_trades").select("*").eq("user_id", user_id).in_("status", ["ACTIVE", "PENDING_FILL"]).execute()
-            if trades_res.data:
-                active_trades_data = trades_res.data
-        except Exception as e:
-            st.error(f"Could not load paper trades: {e}")
-
-        total_allocated = 0
-        try:
-            cfgs_all = supabase.table("algo_setup_configs").select("allocated_capital, is_active").eq("user_id", user_id).execute()
-            if cfgs_all.data:
-                total_allocated = sum(c.get("allocated_capital", 0) for c in cfgs_all.data if c.get("is_active"))
-        except Exception:
-            pass
-
-        deployed_capital = sum(float(t.get("entry_price", 0)) * int(t.get("qty", 0)) for t in active_trades_data)
-        dry_powder = max(0.0, float(total_allocated) - float(deployed_capital))
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Allocated Capital", f"₹{total_allocated:,.0f}")
-        m2.metric("Deployed Capital", f"₹{deployed_capital:,.0f}")
-        m3.metric("Dry Powder", f"₹{dry_powder:,.0f}")
-        m4.metric("Active Positions", len(active_trades_data))
-
-        st.divider()
-        if not active_trades_data:
-            st.info("No active positions currently open. `engine.py` is monitoring the market for entry conditions.")
-        else:
-            trades_df = pd.DataFrame(active_trades_data)
-            display_cols = ["ticker", "setup_name", "status", "entry_price", "qty", "active_sl", "active_target", "ratchet_level", "days_in_trade"]
-            available_cols = [c for c in display_cols if c in trades_df.columns]
-            
-            st.dataframe(
-                trades_df[available_cols],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "ticker": "Symbol",
-                    "setup_name": "Setup Pod",
-                    "status": "State",
-                    "entry_price": st.column_config.NumberColumn("Entry Price", format="₹%.2f"),
-                    "qty": "Quantity",
-                    "active_sl": st.column_config.NumberColumn("Trailing SL", format="₹%.2f"),
-                    "active_target": st.column_config.NumberColumn("Target (+10%)", format="₹%.2f"),
-                    "ratchet_level": "Ratchet Tier",
-                    "days_in_trade": "Days Held"
-                }
-            )
-
-    # ------------------------------------------------------------------------------
-    # ALGO TAB 3: PERFORMANCE LEDGER
-    # ------------------------------------------------------------------------------
-    with tab_perf:
-        st.markdown("#### Closed Trades Historical Audit")
-        closed_trades = []
-        try:
-            closed_res = supabase.table("active_paper_trades").select("*").eq("user_id", user_id).eq("status", "CLOSED").order("updated_at", desc=True).execute()
-            if closed_res.data:
-                closed_trades = closed_res.data
-        except Exception as e:
-            st.error(f"Error fetching historical ledger: {e}")
-
-        if not closed_trades:
-            st.info("No closed trades logged yet. Historical audit records will appear here as positions exit.")
-        else:
-            closed_df = pd.DataFrame(closed_trades)
-            st.dataframe(
-                closed_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-# ----------------------------------------------------------------------------------
 # Main UI App Loop
 # ----------------------------------------------------------------------------------
 
@@ -2056,7 +1823,6 @@ def _run_streamlit_ui():
     
     user_is_admin = is_admin(current_user)
     user_is_authorized_or_admin = is_authorized_or_admin(current_user)
-    user_is_algo_authorized = is_algo_authorized(current_user)
 
     head_l, head_r = st.columns([3, 2])
     with head_l:
@@ -2113,8 +1879,6 @@ def _run_streamlit_ui():
     tab_list = ["🔍 Stock Screener", "💼 Portfolio Evaluator"]
     if user_is_authorized_or_admin:
         tab_list.append("📈 Stocks Setting Up")
-    if user_is_algo_authorized:
-        tab_list.append("🤖 Algo Fund Manager")
     tab_list.extend(["🎛️ User-defined controls", "ℹ️ User Guide"])
     if user_is_admin:
         tab_list.append("🛠️ Admin Panel")
@@ -2228,6 +1992,7 @@ def _run_streamlit_ui():
             help="Extra NSE symbols, comma-separated (e.g. TRENT, HDFCBANK). .NS is added if you omit it.",
         )
         
+        # --- NEW AGGRESSIVE PARSER FOR SCREENER TAB ---
         temp_str_main = custom_raw.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
         raw_list_main = [s.strip().upper() for s in temp_str_main.split(",") if s.strip()]
         custom_tickers = []
@@ -2235,6 +2000,7 @@ def _run_streamlit_ui():
             clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
             if clean:
                 custom_tickers.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+        # ----------------------------------------------
         
         watchlist_tickers = []
         universe = list(dict.fromkeys(selected_universe + custom_tickers + watchlist_tickers))
@@ -2639,6 +2405,7 @@ def _run_streamlit_ui():
                     else:
                         all_tickers_su.extend(load_index_list(univ))
                 
+                # --- NEW AGGRESSIVE PARSER FOR SETUPS TAB ---
                 temp_str_su = custom_raw_su.replace("\n", ",").replace(" ", ",").replace(";", ",").replace("\t", ",")
                 raw_list_su = [s.strip().upper() for s in temp_str_su.split(",") if s.strip()]
                 custom_tickers_su = []
@@ -2646,6 +2413,7 @@ def _run_streamlit_ui():
                     clean = sym.replace("NSE:", "").replace("BSE:", "").replace("-EQ", "").replace("-BE", "").strip()
                     if clean:
                         custom_tickers_su.append(f"{clean}.NS" if not clean.endswith(".NS") else clean)
+                # ----------------------------------------------
                 
                 all_tickers_su.extend(csv_tickers_su)
                 all_tickers_su.extend(custom_tickers_su)
@@ -2661,6 +2429,7 @@ def _run_streamlit_ui():
                     top_tickers_list = []
                     score_map = {}
                     
+                    # Bypass Fundamental Ranking if Top N >= Total Tickers
                     if top_n_su >= len(all_tickers_su):
                         st.info(f"⚡ Top N ({top_n_su}) is ≥ Total Tickers ({len(all_tickers_su)}). Bypassing fundamental ranking to save time...")
                         top_tickers_list = all_tickers_su
@@ -2718,13 +2487,7 @@ def _run_streamlit_ui():
                             st.info(f"None of the {len(top_tickers_list)} stocks triggered your selected setup(s) today.")
 
     # ==================================================================================
-    # TAB 4: ALGO FUND MANAGER (Admin / Algo Authorized Only)
-    # ==================================================================================
-    elif selected_tab == "🤖 Algo Fund Manager":
-        render_algo_manager()
-
-    # ==================================================================================
-    # TAB 5: USER CONTROLS
+    # TAB 4: USER GUIDE
     # ==================================================================================
     elif selected_tab == "🎛️ User-defined controls":
         st.subheader("User-defined controls")
@@ -2905,9 +2668,6 @@ def _run_streamlit_ui():
             _persist_digest_pref()
             st.success("All your weights, rules, and preferences have been securely saved to your account!")
 
-    # ==================================================================================
-    # TAB 6: USER GUIDE
-    # ==================================================================================
     elif selected_tab == "ℹ️ User Guide":
         st.subheader("ℹ️ Comprehensive User Guide & Feature Workflows")
         st.markdown(
@@ -2995,7 +2755,7 @@ def _run_streamlit_ui():
             )
 
     # ==================================================================================
-    # TAB 7: ADMIN PANEL (DYNAMIC ROLE-BASED)
+    # TAB 5: ADMIN PANEL (DYNAMIC ROLE-BASED)
     # ==================================================================================
     elif selected_tab == "🛠️ Admin Panel":
         st.subheader("🛠️ Administrator Control & Registered System Users")
